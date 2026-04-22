@@ -1,0 +1,32 @@
+{
+  "name": "deep-work-ai",
+  "version": "3.2.0",
+  "description": "AI-powered workspace management plugin for Logitech MX Creative Console",
+  "main": "./dist/index.mjs",
+  "type": "module",
+  "scripts": {
+    "build": "npm run clean && node esbuild.config.js",
+    "build:pack": "npm run build:prod && npm run pack",
+    "build:prod": "npm run clean && cross-env NODE_ENV=production node esbuild.config.js",
+    "clean": "rimraf dist",
+    "pack": "logitoolkit pack",
+    "link": "logitoolkit link",
+    "unlink": "logitoolkit unlink",
+    "watch": "npm run clean && node esbuild.config.js --watch"
+  },
+  "author": "Deep Work AI",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@logitech/plugin-sdk": "0.1.1"
+  },
+  "devDependencies": {
+    "@logitech/plugin-toolkit": "0.1.1",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.25.10",
+    "rimraf": "^6.0.1",
+    "yaml": "^2.8.1"
+  }
+}

@@ -1,0 +1,13 @@
+# Deep Work AI v2 — requirements.txt
+# Run: pip install -r requirements.txt
+
+pywin32>=306          # Windows window management APIs
+psutil>=5.9.0         # Process detection + management
+requests>=2.31.0      # Slack / GitHub / Jira HTTP APIs
+PyQt6>=6.5.0          # Micro-journal overlay UI
+scikit-learn>=1.3.0   # TF-IDF + LogisticRegression notification classifier
+python-dotenv>=1.0.0  # .env file loading for tokens
+pyautogui>=0.9.54     # Debug surface keyboard shortcuts (F5, F10, F11 etc.)
+
+# Optional — install for better performance:
+# numpy>=1.24.0       # Faster sklearn vectorisation (already pulled in by sklearn)

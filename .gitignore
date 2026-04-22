@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.idea/
+.vscode/
+
+# Runtime data (auto-generated)
+data/*.db
+data/*.json
+data/*.log
+data/*.pid
+data/*.txt
+!data/.gitkeep
+
+# Logs
+*.log
+
+# Environment
+.env
+
+# Node.js (Logi plugin build)
+node_modules/
+deepworkai/plugin/dist/

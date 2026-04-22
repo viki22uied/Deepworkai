@@ -1,0 +1,13 @@
+type: plugin4
+name: DeepWorkAi
+version: 3.2.0
+displayName: Deep Work AI
+description: "Deep Work AI v2 — Focus Shield, Triage, Meeting Mode, Anchor, Journal, Palette, Debug Surface, Git Pulse"
+author: Deep Work AI
+minimumLoupedeckVersion: 6.1
+
+pluginType: remote
+pluginRuntime: nodejs
+entryPoint: index.mjs
+
+pluginCapabilities:
