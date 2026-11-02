@@ -27,16 +27,8 @@ POLL_SEC   = 60
 
 
 def _cfg(key: str) -> str:
-    val = os.environ.get(key, "")
-    if val:
-        return val
-    env = BASE_DIR / ".env"
-    if env.exists():
-        for line in env.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith(f"{key}=") and not line.startswith("#"):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return ""
+    from deepworkai.service.secrets_store import get
+    return get(key)
 
 
 def _gh(endpoint: str) -> dict | list | None:
