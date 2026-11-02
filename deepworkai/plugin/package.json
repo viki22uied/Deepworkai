@@ -1,7 +1,7 @@
 {
   "name": "deep-work-ai",
   "version": "4.0.0",
-  "description": "AI-powered workspace management plugin for Logitech MX Creative Console",
+  "description": "Focus plugin for the Logitech MX Creative Console. Built by the Deep Work AI team, a Top 50 project and semi-finalist in the Logitech DevStudio Hackathon.",
   "main": "./dist/index.mjs",
   "type": "module",
   "scripts": {

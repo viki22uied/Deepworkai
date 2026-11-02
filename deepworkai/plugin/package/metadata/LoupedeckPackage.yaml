@@ -2,7 +2,7 @@ type: plugin4
 name: DeepWorkAi
 version: 4.0.0
 displayName: Deep Work AI
-description: "Protect your focus with three keys and a dial: Focus Shield, Resume where you left off, a smart Inbox that holds interruptions, and Time Travel to any earlier moment. Fully local — nothing leaves your PC."
+description: "Protect your focus with three keys and a dial: Focus Shield, Resume where you left off, a smart Inbox that holds interruptions, and Time Travel to any earlier moment. Fully local — nothing leaves your PC. Built by the Deep Work AI team: a Top 50 project and semi-finalist in the Logitech DevStudio Hackathon."
 author: Vignesh Kumar U
 minimumLoupedeckVersion: 6.1
 
