@@ -632,6 +632,30 @@ deepworkai/
 
 ---
 
+## Privacy, Offline Mode & the Hub
+
+**Everything runs on your PC.** There is no Deep Work AI server, account, or telemetry — nothing is ever sent to us.
+All data lives in `data/` inside your project folder (SQLite files you can delete at any time).
+
+| Setting (environment variable) | Effect |
+|---|---|
+| `DEEPWORKAI_OFFLINE=1` | Disables every outbound call (GitHub, Jira, Slack). Everything else keeps working. |
+| `DEEPWORKAI_PRIVATE_MODE=1` | No window titles stored, no automatic context capture. |
+| `DEEPWORKAI_RETENTION_DAYS=14` | Activity & intelligence data older than this is deleted automatically. |
+
+Emails, tokens/API keys and URL query strings are scrubbed before anything is written to disk.
+GitHub/Jira/Slack are optional: they only run if you add your own tokens to `.env`, and they talk
+directly from your PC to your own accounts.
+
+**The Hub** (`deepworkai/ui/hub.py`) is the single window for everything you look at:
+- **Focus** — current activity, live focus score, "where was I", next step *(opens from Context Rewind)*
+- **Inbox** — notifications the AI held or batched, with the reason *(opens from Triage)*
+- **Insights** — your best focus hours, deep-work time, who interrupts you
+
+Keys: `1` `2` `3` switch tabs, `Esc` closes. Try it without any data: `python -m deepworkai.ui.hub --demo`
+
+---
+
 ## Troubleshooting
 
 ### Service won't start
