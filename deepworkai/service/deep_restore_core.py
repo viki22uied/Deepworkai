@@ -355,89 +355,28 @@ _DEV_URL_PATTERNS = [
     "npmjs.com", "pypi.org", "crates.io",
 ]
 
+# Bumped when tab capture became accurate. Snapshots without it were captured
+# from the recently-closed list and must not have their tabs restored.
+TABS_FORMAT = 2
+
 # Max tabs to capture per browser — prevents tab floods on restore
 _MAX_TABS_PER_BROWSER = 20
 
 
-def _is_dev_url(url: str) -> bool:
-    """True if URL is worth restoring. Now accepts all URLs for production grade model."""
-    # We no longer filter URLs so that all user tabs are captured and restored.
-    return True
-
-
-def _parse_snss_urls(path: Path) -> list[str]:
-    """
-    Extract HTTP/S URLs from a Chromium SNSS binary session file.
-    Reads null-terminated UTF-16LE strings and filters for http(s):// entries.
-    """
-    try:
-        data = path.read_bytes()
-        # Find all UTF-16LE encoded http/https URLs in the binary blob
-        pattern = re.compile(b'h\x00t\x00t\x00p\x00[s\x00]?\x00:\x00/\x00/\x00')
-        urls: list[str] = []
-        for m in pattern.finditer(data):
-            start = m.start()
-            end = data.find(b'\x00\x00\x00', start + 20)
-            if end == -1 or end - start > 2048:
-                continue
-            chunk = data[start:end + 1]
-            try:
-                url = chunk.decode('utf-16-le').rstrip('\x00').split('\x00')[0]
-                if url.startswith('http') and len(url) > 10:
-                    urls.append(url)
-            except UnicodeDecodeError:
-                pass
-        # Deduplicate preserving order
-        seen: set[str] = set()
-        return [u for u in urls if not (u in seen or seen.add(u))]
-    except Exception:
-        return []
-
-
 def _read_browser_tabs(browser_exe: str) -> list[dict]:
     """
-    Capture currently open tabs — ONLY developer-relevant URLs.
-    Reads Chromium SNSS session files, filters to dev URLs, caps at 5 tabs.
-    No history fallback (history != open tabs, and it causes tab floods).
+    Capture the tabs that are open *right now*.
+    Replays the live Session_* command log (see chromium_session.py). The old
+    code scraped every URL out of Sessions/Tabs_* — Chromium's *recently
+    closed* list — which restored tabs closed days or months ago.
     """
+    from chromium_session import read_open_tabs
     session_dir = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
     if not session_dir:
         return []
-
-    urls = []
-
-    # 1. Modern Chromium: check 'Sessions/Tabs_*' files, newest first
-    sessions_dir = session_dir / "Sessions"
-    if sessions_dir.exists():
-        tab_files = list(sessions_dir.glob("Tabs_*"))
-        if tab_files:
-            tab_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            for tab_file in tab_files:
-                urls = _parse_snss_urls(tab_file)
-                if urls:
-                    break
-
-    # 2. Legacy Chromium: fallback to 'Current Tabs' and 'Last Tabs'
-    if not urls:
-        current_tabs = session_dir / "Current Tabs"
-        last_tabs    = session_dir / "Last Tabs"
-        if current_tabs.exists():
-            urls = _parse_snss_urls(current_tabs)
-        if not urls and last_tabs.exists():
-            urls = _parse_snss_urls(last_tabs)
-
-    if not urls:
-        return []
-
-    # Filter to developer-relevant URLs only, cap at MAX
-    dev_tabs = []
-    for u in urls:
-        if _is_dev_url(u) and len(dev_tabs) < _MAX_TABS_PER_BROWSER:
-            dev_tabs.append({"url": u, "title": u})
-
-    log.info("[CAPTURE] %s: %d total tabs → %d dev tabs captured",
-             browser_exe, len(urls), len(dev_tabs))
-    return dev_tabs
+    urls = read_open_tabs(session_dir)[:_MAX_TABS_PER_BROWSER]
+    log.info("[CAPTURE] %s: %d open tabs captured", browser_exe, len(urls))
+    return [{"url": u, "title": u} for u in urls]
 
 
 def _detect_active_browsers() -> list[str]:
@@ -599,6 +538,7 @@ def capture_workspace() -> dict:
         "vscode":        vscode,
         "git":           git,
         "terminal_cwds": terminal_cwds,
+        "tabs_format":   TABS_FORMAT,
         "captured_at":   datetime.now().isoformat(),
     }
 
@@ -691,30 +631,12 @@ def get_recent_snapshots(limit: int = 10) -> list[dict]:
 
 # ── App Launch ────────────────────────────────────────────────────────────────
 def _get_currently_open_urls(browser_exe: str) -> set:
-    """
-    Read currently-open URLs from the live browser session files.
-    Used to avoid re-opening tabs that are already open.
-    """
+    """URLs open in the live browser session — used to avoid duplicate tabs."""
+    from chromium_session import read_open_tabs
     session_dir = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
     if not session_dir:
         return set()
-    urls: set = set()
-    sessions_dir = session_dir / "Sessions"
-    if sessions_dir.exists():
-        tab_files = sorted(sessions_dir.glob("Tabs_*"),
-                           key=lambda p: p.stat().st_mtime, reverse=True)
-        for tf in tab_files[:3]:          # check only the 3 most recent
-            for u in _parse_snss_urls(tf):
-                urls.add(u.split("#")[0].rstrip("/"))  # normalise
-            if urls:
-                break
-    # Also check legacy session files
-    for fname in ("Current Tabs", "Last Tabs"):
-        f = session_dir / fname
-        if f.exists():
-            for u in _parse_snss_urls(f):
-                urls.add(u.split("#")[0].rstrip("/"))
-    return urls
+    return {u.split("#")[0].rstrip("/") for u in read_open_tabs(session_dir)}
 
 
 def launch_browser(browser_exe: str, tabs: list) -> bool:
@@ -922,6 +844,10 @@ def restore_workspace(snapshot: dict, label: str = ""):
     """
     windows       = snapshot.get("windows", [])
     browsers      = snapshot.get("browsers", {})
+    if browsers and snapshot.get("tabs_format", 1) < TABS_FORMAT:
+        log.info("[RESTORE] Skipping browser tabs from legacy snapshot "
+                 "(captured from the recently-closed list, not open tabs)")
+        browsers = {}
 
     running = {p.info["name"].lower()
                for p in psutil.process_iter(["name"])}
