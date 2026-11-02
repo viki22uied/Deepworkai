@@ -65,6 +65,7 @@ DEVELOPER_DOMAINS = {
 
 def setup_db():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS events (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,26 +158,39 @@ def get_active_window() -> dict | None:
         return None
 
 
-def get_git_context() -> dict:
-    try:
-        root = run_hidden(["git", "rev-parse", "--show-toplevel"], timeout=3)
-        if root.returncode != 0:
-            return {}
-        cwd    = root.stdout.strip()
-        branch = run_hidden(["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                            cwd=cwd, timeout=3).stdout.strip()
-        changed = run_hidden(["git", "diff", "--name-only"],
-                             cwd=cwd, timeout=3).stdout.strip()
-        last    = run_hidden(["git", "log", "--oneline", "-1", "--format=%s"],
-                             cwd=cwd, timeout=3).stdout.strip()
-        return {
-            "branch":        branch,
-            "changed_files": [f for f in changed.splitlines() if f][:8],
-            "last_commit":   last,
-            "repo":          Path(cwd).name,
-        }
-    except Exception:
+_git_cache: dict = {"path": "", "t": 0.0, "ctx": {}}
+GIT_POLL = 30   # seconds
+
+
+def get_git_context(workspace: str) -> dict:
+    """Git info for the project you're actually in (not the service's own folder)."""
+    if not workspace or not Path(workspace).exists():
         return {}
+    if workspace == _git_cache["path"] and time.time() - _git_cache["t"] < GIT_POLL:
+        return _git_cache["ctx"]
+    try:
+        root = run_hidden(["git", "rev-parse", "--show-toplevel"], cwd=workspace, timeout=3)
+        if root.returncode != 0:
+            ctx: dict = {}
+        else:
+            cwd    = root.stdout.strip()
+            branch = run_hidden(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                                cwd=cwd, timeout=3).stdout.strip()
+            changed = run_hidden(["git", "diff", "--name-only"],
+                                 cwd=cwd, timeout=3).stdout.strip()
+            last    = run_hidden(["git", "log", "--oneline", "-1", "--format=%s"],
+                                 cwd=cwd, timeout=3).stdout.strip()
+            ctx = {
+                "branch":        branch,
+                "changed_files": [f for f in changed.splitlines() if f][:8],
+                "last_commit":   last,
+                "repo":          Path(cwd).name,
+                "path":          cwd,
+            }
+    except Exception:
+        ctx = {}
+    _git_cache.update(path=workspace, t=time.time(), ctx=ctx)
+    return ctx
 
 
 def get_open_browser_tabs() -> list[str]:
@@ -202,8 +216,10 @@ def record_loop(stop_event=None):
     setup_db()
     log.info("Activity recorder started. Polling every %ds.", POLL_INTERVAL)
 
+    from deepworkai.service.ide_context import active_workspace
     last_app    = None
     last_branch = None
+    workspace   = ""
     last_commit = None
     tab_counter = 0
 
@@ -220,8 +236,14 @@ def record_loop(stop_event=None):
                     details={"title": window["title"]},
                 )
 
+            # Which project are we in? (from the IDE window title + VS Code/Cursor state)
+            if window and window["label"] in ("VS Code", "Cursor"):
+                workspace = active_workspace(window["title"]) or workspace
+            elif not workspace:
+                workspace = active_workspace()
+
             # Git branch tracking
-            git = get_git_context()
+            git = get_git_context(workspace)
             if git:
                 key = f"{git.get('repo')}:{git.get('branch')}"
                 if key != last_branch:
