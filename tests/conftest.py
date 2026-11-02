@@ -17,6 +17,37 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "deepworkai" / "service"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+os.environ["DEEPWORKAI_OFFLINE"] = "1"          # tests never call GitHub/Slack/Jira
+os.environ.pop("DEEPWORKAI_BLOCK_DISTRACTIONS", None)
+
+# Tests must never act on the PC running them. A missed fake once made the suite open
+# VS Code for real; now any attempt to start a program, open a page or press keys fails
+# the test instead. Only read-only helpers the code needs are allowed.
+_ALLOWED_EXES = {"git", "icacls", "where"}
+
+
+@pytest.fixture(autouse=True)
+def _no_side_effects(monkeypatch):
+    import subprocess
+    import webbrowser
+    real_popen = subprocess.Popen
+
+    def guarded(args, *a, **k):
+        exe = Path(str(args[0] if isinstance(args, (list, tuple)) else str(args).split()[0])).stem.lower()
+        if exe not in _ALLOWED_EXES:
+            raise AssertionError(f"test tried to start a real program: {exe}")
+        return real_popen(args, *a, **k)
+
+    monkeypatch.setattr(subprocess, "Popen", guarded)
+    monkeypatch.setattr(webbrowser, "open", lambda *a, **k: (_ for _ in ()).throw(AssertionError("test opened a browser")))
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", lambda *a, **k: (_ for _ in ()).throw(AssertionError("test opened a file")))
+    fake = types.ModuleType("pyautogui")              # stand-in: the real one would press keys
+    for f in ("press", "hotkey", "typewrite", "write", "click"):
+        setattr(fake, f, lambda *a, **k: (_ for _ in ()).throw(AssertionError("test pressed keys")))
+    monkeypatch.setitem(sys.modules, "pyautogui", fake)
+
+
 
 class FakeCore(types.ModuleType):
     """Stands in for deep_restore_core (pywin32/winreg) only."""

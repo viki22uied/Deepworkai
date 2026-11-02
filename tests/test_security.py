@@ -206,3 +206,17 @@ def test_shield_closes_nothing_unless_opted_in(svc, monkeypatch):
     monkeypatch.setenv("DEEPWORKAI_BLOCK_DISTRACTIONS", "1")
     svc._enforce_dnd_block()
     assert "windows" in closed
+
+
+def test_tests_cannot_touch_the_pc():
+    """The conftest guard: a test that forgets a fake fails instead of opening apps or pressing keys."""
+    import subprocess
+    import webbrowser
+    import pytest
+    with pytest.raises(AssertionError):
+        subprocess.Popen(["notepad.exe"])
+    with pytest.raises(AssertionError):
+        webbrowser.open("https://example.com")
+    import pyautogui
+    with pytest.raises(AssertionError):
+        pyautogui.press("f5")

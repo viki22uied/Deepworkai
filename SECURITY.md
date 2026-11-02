@@ -26,6 +26,8 @@ and the [OWASP Desktop App Security Top 10](https://owasp.org/www-project-deskto
 | Data protection | Window titles and URLs redacted before storage (emails, tokens, query secrets); secret URL parameters stripped from snapshots; automatic deletion after `DEEPWORKAI_RETENTION_DAYS` (default 14) | ASVS V8.3, GDPR data minimisation |
 | Availability | Max 32 concurrent clients, 2 s read timeout, bounded queries and caches | ASVS V11, CWE-400 |
 | Network | Offline by default; optional GitHub/Jira/Slack calls use HTTPS with certificate verification; `DEEPWORKAI_OFFLINE=1` disables all of them | ASVS V9, DA-Top10 DA8 |
+| Side effects | Focus Shield never closes windows or kills apps unless `DEEPWORKAI_BLOCK_DISTRACTIONS=1`; debugger keys are only sent when VS Code/Cursor is in front; nothing restores or launches apps without a key press or dial turn | CWE-1188 |
+| Test isolation | The test suite cannot start programs, open browsers or press keys on the machine running it (enforced for every test, with a test proving the guard works) | — |
 | Dependencies | Runtime dependencies scanned (`pip-audit`, `npm audit --omit=dev`): 0 known vulnerabilities at release | ASVS V14.2, DA-Top10 DA9 |
 | Code analysis | `bandit` static analysis: 0 medium/high findings (justified exceptions are annotated `# nosec` with a reason) | ASVS V14 |
 
