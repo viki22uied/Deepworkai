@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 const HOST = '127.0.0.1';
 const PORT = 57321;
-const COMMAND_TIMEOUT = 8000;
+const COMMAND_TIMEOUT = 30000;   // some service commands (CAPTURE/RESTORE) are slow
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 500;
 const SPAWN_WAIT = 3500;
@@ -40,14 +40,53 @@ export function log(msg) {
 }
 
 // ── Python / Service Discovery ───────────────────────────────────────────────
+// NOTE: after bundling, __dirname is the plugin's dist/ folder, and when the
+// plugin is installed via `logitoolkit pack` it lives inside the Logi plugin
+// directory, far from the repo. So never assume a fixed relative layout —
+// search a few candidate locations instead.
 function getConfig() {
-  const configFile = path.resolve(__dirname, '..', 'config.json');
-  try {
-    if (fs.existsSync(configFile)) {
-      return JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+  const candidates = [
+    path.resolve(__dirname, '..', 'config.json'),                  // plugin/config.json (linked/dev)
+    path.resolve(__dirname, 'config.json'),
+    process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH
+      ? path.join(process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH, 'config.json')
+      : null,
+  ].filter(Boolean);
+  for (const configFile of candidates) {
+    try {
+      if (fs.existsSync(configFile)) {
+        return JSON.parse(fs.readFileSync(configFile, 'utf-8'));
+      }
+    } catch (e) {
+      log(`[CONFIG] Failed to parse ${configFile}: ${e.message}`);
     }
-  } catch (_) {}
+  }
   return {};
+}
+
+const SERVICE_REL = path.join('deepworkai', 'service', 'deepwork_service.py');
+
+/** Repo root (folder containing deepworkai/service/deepwork_service.py). */
+export function getProjectRoot() {
+  const cfg = getConfig();
+  if (process.env.DEEPWORKAI_ROOT && fs.existsSync(path.join(process.env.DEEPWORKAI_ROOT, SERVICE_REL))) {
+    return process.env.DEEPWORKAI_ROOT;
+  }
+  if (cfg.project_root && fs.existsSync(path.join(cfg.project_root, SERVICE_REL))) {
+    return cfg.project_root;
+  }
+  if (cfg.service_script && fs.existsSync(cfg.service_script)) {
+    return path.resolve(path.dirname(cfg.service_script), '..', '..');
+  }
+  // Walk up from the bundle location (works when the plugin is linked from the repo).
+  let dir = __dirname;
+  for (let i = 0; i < 6; i++) {
+    if (fs.existsSync(path.join(dir, SERVICE_REL))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
 }
 
 function getPythonExecutable() {
@@ -69,7 +108,8 @@ function getPythonExecutable() {
 function getServicePath() {
   const cfg = getConfig();
   if (cfg.service_script && fs.existsSync(cfg.service_script)) return cfg.service_script;
-  return path.resolve(__dirname, '..', 'service', 'deepwork_service.py');
+  const root = getProjectRoot();
+  return root ? path.join(root, SERVICE_REL) : null;
 }
 
 // ── Service Health ───────────────────────────────────────────────────────────
@@ -98,8 +138,8 @@ function spawnService() {
     const pythonPath = getPythonExecutable();
     const servicePath = getServicePath();
 
-    if (!fs.existsSync(servicePath)) {
-      log(`[SPAWN] ERROR: Service not found at ${servicePath}`);
+    if (!servicePath || !fs.existsSync(servicePath)) {
+      log(`[SPAWN] ERROR: Service not found (${servicePath}). Set project_root in plugin/config.json or DEEPWORKAI_ROOT.`);
       _serviceSpawning = false;
       resolve(false);
       return;
@@ -108,6 +148,7 @@ function spawnService() {
     log(`[SPAWN] Starting: ${pythonPath} ${servicePath}`);
     try {
       const child = spawn(pythonPath, [servicePath], {
+        cwd: path.dirname(servicePath),
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
@@ -151,14 +192,16 @@ function sendCommandOnce(command) {
       else resolve(result);
     };
 
+    let sent = false;
     client.setTimeout(COMMAND_TIMEOUT);
-    client.connect(PORT, HOST, () => { client.write(command + '\n'); });
+    client.connect(PORT, HOST, () => { sent = true; client.write(command + '\n'); });
     client.on('data', (data) => {
       output += data.toString();
       if (output.includes('\n')) settle(null, output.trim());
     });
-    client.on('error', (err) => settle(err));
-    client.on('timeout', () => settle(new Error('Command timeout')));
+    client.on('error', (err) => { err.sent = sent; settle(err); });
+    client.on('timeout', () => { const e = new Error('Command timeout'); e.sent = sent; settle(e); });
+    client.on('end', () => settle(null, output.trim()));
   });
 }
 
@@ -170,6 +213,9 @@ export async function sendCommand(command) {
       return result;
     } catch (e) {
       log(`[CMD] Attempt ${attempt}/${MAX_RETRIES} failed: ${e.message}`);
+      // If the command already reached the service, do NOT resend it:
+      // toggles (SHIELD_TOGGLE, MEETING_TOGGLE) would flip back, CAPTURE would duplicate.
+      if (e.sent) throw e;
       if (attempt < MAX_RETRIES) {
         await ensureService();
         await new Promise((r) => setTimeout(r, RETRY_DELAY * attempt));
