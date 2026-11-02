@@ -1,110 +1,59 @@
 /**
  * Deep Work AI — Time Travel Dial
  * ================================
- * Rotate to select how many minutes back to go.
- * Stop rotating → auto-restores after 1 second of inactivity.
+ * Turn the dial and a Time Travel overlay appears, showing your saved moments
+ * with what you were doing at each one (activity, repo/branch, file, tabs,
+ * focus score, your note).
  *
- * Why auto-fire? The Logitech SDK v0.1.1 AdjustmentAction does not
- * expose dial-press events through execute(). The "rotate and pause"
- * UX is better anyway — no separate press needed.
+ *   ← counter-clockwise = further back in time
+ *   → clockwise         = towards now ("Now" = cancel, nothing restored)
+ *   stop turning        = the selected moment is restored after COMMIT_MS
  *
- * Context-aware: while a debug session is running the dial steps the
- * debugger instead (→ Step Over, ← Step Out). The service decides.
- *
- * ← rotate left  = go further back in time  (more minutes)
- * → rotate right = come forward in time     (fewer minutes)
- * Stop turning   = auto-restores after 1 second
+ * Context-aware: while a debug session is running the dial steps the debugger
+ * instead (→ Step Over, ← Step Out). The service decides which mode applies.
  */
 
 import { AdjustmentAction } from '@logitech/plugin-sdk';
-import { ensureService, sendCommand, log } from './tcp-client.js';
+import { sendCommand, log } from './tcp-client.js';
 
-let _rewindMinutes = 15;      // currently selected target
-let _fireTimer     = null;    // auto-fire debounce timer
-let _lastFireMs    = 0;       // prevent duplicate fires
+const COMMIT_MS = 2500;      // pause long enough to read the card, short enough to feel instant
 
-const MIN_MINUTES  = 5;
-const MAX_MINUTES  = 480;     // 8 hours max
-const AUTO_FIRE_MS = 1000;    // fire 1s after last rotation tick
-const COOLDOWN_MS  = 3000;    // don't fire again within 3s of last restore
+let _commitTimer = null;
+let _queue = Promise.resolve();   // keep ticks in order
 
-
-function scheduleRewind() {
-  // Clear any pending fire
-  if (_fireTimer) {
-    clearTimeout(_fireTimer);
-    _fireTimer = null;
-  }
-
-  _fireTimer = setTimeout(async () => {
-    _fireTimer = null;
-
-    // Cooldown check
-    const now = Date.now();
-    if (now - _lastFireMs < COOLDOWN_MS) {
-      log(`[DIAL] Cooldown — skipping fire (${_rewindMinutes}m)`);
-      return;
-    }
-    _lastFireMs = now;
-
-    log(`[DIAL] Auto-fire → REWIND:${_rewindMinutes}`);
-    await ensureService();
+function scheduleCommit() {
+  clearTimeout(_commitTimer);
+  _commitTimer = setTimeout(async () => {
     try {
-      const result = await sendCommand(`REWIND:${_rewindMinutes}`);
-      log(`[DIAL] Result: ${result}`);
+      log(`[DIAL] ${await sendCommand('TRAVEL_COMMIT')}`);
     } catch (e) {
-      log(`[DIAL] REWIND failed: ${e.message}`);
+      log(`[DIAL] commit failed: ${e.message}`);
     }
-  }, AUTO_FIRE_MS);
+  }, COMMIT_MS);
 }
-
 
 export class TimeTravelAction extends AdjustmentAction {
   name        = 'time_travel';
   displayName = 'Time Travel';
-  description = 'Rotate ← further back · → closer · Stop = auto-restore';
+  description = 'Turn ← to go back through your day · → towards now · stop to restore';
   groupName   = 'Deep Work AI';
   hasReset    = false;   // required by AdjustmentAction (abstract in the SDK)
 
-  /**
-   * Called by SDK on every encoder tick.
-   * tick > 0 = clockwise (forward in time = fewer minutes)
-   * tick < 0 = counter-clockwise (further back = more minutes)
-   */
+  /** Called by the SDK on every encoder tick. Returns immediately. */
   execute(event) {
     const tick = Number.isFinite(event?.tick) ? event.tick : 0;
-    // Return immediately; route the tick asynchronously.
-    this._route(tick);
+    if (tick === 0) return;
+    _queue = _queue.then(() => this._route(tick));
   }
 
   async _route(tick) {
-    if (tick !== 0) {
-      try {
-        const r = await sendCommand(`DIAL:${tick}`);
-        if (r.includes('debug')) {
-          log(`[DIAL] ${r}`);
-          return;                     // debugger consumed the tick
-        }
-      } catch (_) { /* service down → fall through to time travel */ }
+    try {
+      const r = await sendCommand(`DIAL:${tick}`);
+      log(`[DIAL] ${r}`);
+      if (r.includes('travel') && !r.includes('noop')) scheduleCommit();
+      else clearTimeout(_commitTimer);          // debugger consumed it
+    } catch (e) {
+      log(`[DIAL] ${e.message}`);
     }
-    this._travel(tick);
-  }
-
-  _travel(tick) {
-
-    if (tick === 0) {
-      // Some SDK versions call execute(tick=0) for press — treat same as pause
-      scheduleRewind();
-      return;
-    }
-
-    // Each tick = ±5 minutes
-    // Counter-clockwise (tick < 0) = go further BACK = increase minutes
-    // Clockwise        (tick > 0) = come FORWARD    = decrease minutes
-    const delta = -tick * 5;   // honour multi-click ticks from fast rotation
-    _rewindMinutes = Math.max(MIN_MINUTES, Math.min(MAX_MINUTES, _rewindMinutes + delta));
-
-    log(`[DIAL] Selected: ${_rewindMinutes}m ago (tick=${tick})`);
-    scheduleRewind();
   }
 }
