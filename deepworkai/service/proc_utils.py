@@ -45,3 +45,24 @@ def get_python() -> str:
         if pythonw.exists():
             return str(pythonw)
     return sys.executable
+
+
+_held = []
+
+
+def single_instance(name: str) -> bool:
+    """True if this process is the only holder of `name` (per Windows user session).
+
+    Taken as the first step, before any side effects, so two copies started at the same
+    instant can't both run. The lock is released automatically when the process exits.
+    """
+    if not _WIN:
+        return True
+    import ctypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    h = k32.CreateMutexW(None, False, "Local\\" + name)
+    if not h or ctypes.get_last_error() == 183:          # ERROR_ALREADY_EXISTS
+        return False
+    _held.append(h)
+    return True

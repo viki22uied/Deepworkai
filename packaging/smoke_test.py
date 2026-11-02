@@ -20,6 +20,8 @@ except OSError:
 home = Path(tempfile.mkdtemp(prefix="dwai-smoke-"))
 env = dict(os.environ, DEEPWORKAI_HOME=str(home), DEEPWORKAI_OFFLINE="1", QT_QPA_PLATFORM="offscreen")
 proc = subprocess.Popen([str(exe)], env=env, cwd=str(exe.parent))
+# Fast key presses on a fresh install can start several copies at once: only one may survive.
+extras = [subprocess.Popen([str(exe)], env=env, cwd=str(exe.parent)) for _ in range(3)]
 
 
 def send(line: str) -> str:
@@ -36,7 +38,7 @@ try:
                 break
         except OSError:
             pass
-        if proc.poll() is not None:
+        if all(p.poll() is not None for p in [proc] + extras):
             raise SystemExit(f"FAIL: app exited with code {proc.returncode}")
         if time.time() > deadline:
             raise SystemExit("FAIL: service did not answer within 60 s")
@@ -59,12 +61,24 @@ try:
         r = send(f"@{key} {cmd}")
         assert r.startswith("OK"), f"{cmd}: {r[:120]}"
     print("ok  core commands")
+
+    launched = [proc] + extras              # any one of them may win the race
+    deadline = time.time() + 10
+    while sum(p.poll() is None for p in launched) > 1 and time.time() < deadline:
+        time.sleep(0.2)
+    assert sum(p.poll() is None for p in launched) == 1, "more than one copy kept running"
+    import psutil
+    mine = [p for p in psutil.process_iter(["exe"]) if (p.info["exe"] or "").lower() == str(exe).lower()]
+    assert len(mine) <= 2, f"{len(mine)} copies running (expected service + Hub)"
+    assert send(f"@{key} STATUS").startswith("OK"), "session key changed by a second copy"
+    print(f"ok  4 simultaneous launches -> {len(mine)} processes (service + Hub)")
     log_text = (home / "data" / "service.log").read_text(errors="ignore")   # must stay readable
     assert "smoke test" not in log_text, "journal text leaked into service.log"
     print("ok  service.log readable, no private text")
     print("PASS")
 finally:
-    proc.terminate()
+    for p in [proc] + extras:
+        p.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:

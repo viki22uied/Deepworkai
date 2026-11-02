@@ -880,7 +880,10 @@ def _handle_client(conn: socket.socket):
 
 
 def main():
-    try:                                   # already running: leave its port and session key alone
+    from deepworkai.service.proc_utils import single_instance
+    if not single_instance("DeepWorkAI-service"):    # already running: leave its port and key alone
+        return
+    try:                                   # a copy outside this user session holds the port
         socket.create_connection((HOST, PORT), timeout=0.5).close()
         return
     except OSError:

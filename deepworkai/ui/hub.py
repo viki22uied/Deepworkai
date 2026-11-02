@@ -1364,6 +1364,9 @@ def main(argv=None):
     _apply_theme(a.theme, app)
     server = None
     if a.background:
+        from deepworkai.service.proc_utils import single_instance
+        if not single_instance("DeepWorkAI-hub"):
+            return 0                       # one UI only — the running one handles commands
         name = f"deepworkai-hub-{getpass_user()}"
         probe = QLocalSocket(); probe.connectToServer(name)
         if probe.waitForConnected(150):
