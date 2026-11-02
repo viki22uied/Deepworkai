@@ -192,3 +192,15 @@ def test_connect_panel_encrypts_and_wipes_token(qapp, tmp_path, monkeypatch, cap
     assert token.encode() not in (tmp_path / "secrets.bin").read_bytes()   # encrypted at rest
     assert token not in caplog.text
     assert all(token not in e.text() for e in p.findChildren(QLineEdit))   # wiped from the UI
+
+
+def test_shield_closes_nothing_unless_opted_in(svc, monkeypatch):
+    closed = []
+    monkeypatch.setattr(svc, "_kill_exe", lambda e: closed.append(e))
+    monkeypatch.setattr(svc, "_close_distraction_windows", lambda: closed.append("windows"))
+    monkeypatch.delenv("DEEPWORKAI_BLOCK_DISTRACTIONS", raising=False)
+    svc._enforce_dnd_block()
+    assert closed == []                       # a YouTube song in Brave keeps playing
+    monkeypatch.setenv("DEEPWORKAI_BLOCK_DISTRACTIONS", "1")
+    svc._enforce_dnd_block()
+    assert "windows" in closed

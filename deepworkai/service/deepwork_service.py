@@ -165,6 +165,10 @@ def _close_distraction_windows():
 
 
 def _enforce_dnd_block():
+    # Opt-in only: closing windows by title shut whole browser windows (all tabs) playing
+    # YouTube, and killing apps loses unsaved work. Shield still holds notifications.
+    if os.environ.get("DEEPWORKAI_BLOCK_DISTRACTIONS") != "1":
+        return
     killed = 0
     for exe in _DISTRACTION_EXES:
         if exe in _PASS_THROUGH_EXES:

@@ -221,7 +221,9 @@ LOG_LEVEL=INFO
 
 **What it does:** A one-button distraction eliminator. When activated:
 - Sets your Slack status to **Do Not Disturb**
-- Freezes or deprioritizes non-essential processes
+- Optional, off by default: closes distracting apps (Spotify, Discord, WhatsApp, Steam…) and windows
+  whose title mentions YouTube, Netflix, Reddit and similar. Turn it on with `DEEPWORKAI_BLOCK_DISTRACTIONS=1`
+  — it closes whole windows, including a browser window with all its tabs.
 - Suppresses system notifications
 - All incoming notifications are held in the Triage Dashboard instead of interrupting you
 
