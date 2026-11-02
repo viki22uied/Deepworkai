@@ -127,3 +127,17 @@ def test_redaction_throughput():
     for _ in range(10000):
         redact(s)
     assert time.perf_counter() - t < 2.0
+
+
+def test_dial_only_browses_and_resume_restores(svc, server):
+    """Stopping the dial restores nothing; Resume (or a dial press) restores the selected moment."""
+    svc._handle_travel_close()
+    before = len(svc.core.restored)
+    assert send(server, auth(svc, "DIAL:-1")).startswith("OK DIAL travel")
+    time.sleep(0.3)
+    assert len(svc.core.restored) == before                    # stopping alone restores nothing
+    r = send(server, auth(svc, "RESUME"))
+    assert r.startswith("OK RESUME TRAVEL"), r
+    time.sleep(0.2)
+    assert len(svc.core.restored) == before + 1
+    assert send(server, auth(svc, "TRAVEL_COMMIT")) == "OK TRAVEL idle"   # nothing left open

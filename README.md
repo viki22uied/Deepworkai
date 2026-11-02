@@ -71,9 +71,14 @@ Three keys and one dial control all functions. Push a key one, two or three time
 |---|---|
 | Turn left | Go back through the moments of your day |
 | Turn right | Go forward to "Now" |
-| Stop turning | After 2.5 seconds, the plugin restores the selected moment |
+| Push the dial | Restore the selected moment |
+| Stop turning | Nothing occurs. After 30 seconds, the Hub closes. |
 
-To look at a moment without a restore, turn the dial back to **Now** before you stop.
+You can also push **Resume** 1 time to restore the selected moment.
+If **Now** is selected, **Resume** does its usual restore.
+To stop without a restore, turn the dial back to **Now**, or push **Esc**.
+
+If the dial push does not restore, put the **Restore moment** action on the dial push or on a key.
 
 A small message shows at the bottom of the screen after each key push without a window.
 For example: "Focus Shield ON", "Focus Shield OFF", "Meeting mode ON" or "Spot saved".
@@ -253,7 +258,7 @@ For the full security model and how to report a vulnerability, read [SECURITY.md
 | The Inbox is empty. | No account is connected, or the Focus Shield is off. | Connect an account. Turn on the Focus Shield. |
 | GitHub items do not appear. | The token is fine-grained. | Use a classic token with the **notifications** scope. |
 | A restore opened old tabs. | The browser restored its own last session. | Close the extra tabs. The plugin cannot close tabs. |
-| The dial restored a moment by accident. | The dial stopped on an earlier moment. | Turn the dial to **Now** before you stop. |
+| The dial push does not restore. | Logi Options+ did not assign the dial push. | Put the **Restore moment** action on the dial push, or push **Resume**. |
 
 The logs are in `%LOCALAPPDATA%\DeepWorkAI\data\service.log` and
 `%LOCALAPPDATA%\Logi\LogiPluginService\Plugins\debug.log`.

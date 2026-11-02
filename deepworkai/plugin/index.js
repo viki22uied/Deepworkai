@@ -11,7 +11,7 @@
 import { PluginSDK } from '@logitech/plugin-sdk';
 
 import { FocusKey, ResumeKey, InboxKey } from './src/test-actions.js';
-import { TimeTravelAction } from './src/adjustment-actions.js';
+import { TimeTravelAction, TimeTravelRestore } from './src/adjustment-actions.js';
 import { log, ensureService, getProjectRoot, bundledAppExe } from './src/tcp-client.js';
 
 const pluginSDK = new PluginSDK();
@@ -22,6 +22,7 @@ const ACTIONS = [
   new ResumeKey(),
   new InboxKey(),
   new TimeTravelAction(),     // Dial
+  new TimeTravelRestore(),    // Dial press: restore the selected moment
 ];
 
 for (const action of ACTIONS) {

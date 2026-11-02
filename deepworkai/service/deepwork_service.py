@@ -519,7 +519,15 @@ def _handle_save_spot() -> str:
 
 
 def _handle_resume() -> str:
-    """Resume key: restore workspace, jump back to the anchored line, show 'where was I'."""
+    """Resume key: restore workspace, jump back to the anchored line, show 'where was I'.
+
+    While Time Travel is open on an earlier moment, Resume restores that moment instead:
+    the dial only browses, and restoring always needs a press."""
+    with _travel_lock:
+        if _travel["open"]:
+            if 0 <= _travel["index"] < len(_travel["items"]):
+                return _handle_travel_commit_locked().replace("TRAVEL", "RESUME TRAVEL", 1)
+            _handle_travel_close_locked()          # on "Now": close it, then resume as usual
     result = _handle_restore()
 
     def _anchor_later():
@@ -599,7 +607,7 @@ def _handle_travel_commit() -> str:
 
 
 def _handle_travel_commit_locked() -> str:
-    """Dial stopped: restore the selected moment (or cancel if on 'Now')."""
+    """Dial pressed (or Resume): restore the selected moment, or cancel if on 'Now'."""
     if not _travel["open"]:
         return "OK TRAVEL idle"
     idx, items = _travel["index"], _travel["items"]

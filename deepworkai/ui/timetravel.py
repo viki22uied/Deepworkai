@@ -8,7 +8,7 @@ your note — so you know exactly where you're going before it restores.
 Two ways in:
   * the dial — the service moves the selection (data/timetravel.json) and
     restores when you stop turning;
-  * the Hub sidebar — browse with the mouse wheel / ↑ ↓, Enter or click restores.
+  * the Hub sidebar — browse with the mouse wheel / ↑ ↓, Enter or click restores; the dial browses, a dial press or Resume restores.
 
 100% local: reads data/*.db read-only.
   python -m deepworkai.ui.timetravel [--demo]   (opens the Hub on this page)
@@ -360,7 +360,7 @@ class TimelinePage(QWidget):
         if self.dial_active() and not self.demo or (self.demo and self.state.get("open")):
             idx = self.state.get("index", -1)
             elapsed = (now - self.state.get("updated", now)) * 1000
-            self.keys.setText("Dial ← back · → towards now · stop to restore · Esc cancels")
+            self.keys.setText("Dial ← back · → towards now · press the dial or Resume to restore · Esc cancels")
             if idx >= 0:
                 self.bar.frac = min(1.0, elapsed / COMMIT_MS)
                 left = max(0.0, (COMMIT_MS - elapsed) / 1000)
@@ -408,7 +408,7 @@ class TimelinePage(QWidget):
                     self.dl.addWidget(label(ln, 14, color=P, wrap=True))
             self.dl.addStretch()
             self.dl.addWidget(label(
-                "Turn the dial left, scroll, or press ↓ to walk back through your day. "
+                "Turn the dial left, scroll, or press ↓ to walk back through your day. Press the dial or Resume to restore. "
                 "Each stop shows what you were doing." if ids else
                 "No saved moments yet. They're captured automatically every 10 minutes while you "
                 "work, when you start focusing, and when you save your spot.", 14, color=P2, wrap=True))
