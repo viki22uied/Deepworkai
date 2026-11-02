@@ -2,8 +2,9 @@
 Deep Work AI — Start (v2)
 =========================
 Run: python start.py
-Starts the TCP service + activity recorder as hidden subprocesses.
-Starts Blocker Radar, Debug Watcher, and Git Pulse as in-process threads.
+Starts the TCP service as a hidden subprocess. The service itself runs the
+activity recorder, workflow intelligence, Blocker Radar, Git Pulse and the
+Debug watcher, so they work the same when the plugin auto-starts it.
 """
 
 import logging
@@ -49,7 +50,6 @@ def start():
     # ── Subprocess services ────────────────────────────────────────────
     scripts = [
         ("Service",          BASE_DIR / "deepworkai" / "service"  / "deepwork_service.py"),
-        ("ActivityRecorder", BASE_DIR / "deepworkai" / "activity" / "recorder.py"),
     ]
     for name, script in scripts:
         if not script.exists():
@@ -58,31 +58,6 @@ def start():
         proc = popen_hidden([python, str(script)], cwd=str(BASE_DIR))
         _processes[name] = proc
         log.info("%s started (PID %d)", name, proc.pid)
-
-    # ── In-process background threads (no subprocess overhead) ─────────
-    try:
-        from deepworkai.features.blocker_radar   import start_radar
-        from deepworkai.features.debug_surface   import start_debug_watcher
-        from deepworkai.features.git_pulse       import start_git_pulse
-
-        start_radar()
-        log.info("Blocker Radar started")
-
-        start_debug_watcher()
-        log.info("Debug Surface watcher started")
-
-        start_git_pulse()
-        log.info("Git Pulse started")
-    except Exception as e:
-        log.warning("Background thread start error: %s", e)
-
-    # ── Ensure palette.json exists ─────────────────────────────────────
-    try:
-        from deepworkai.features.terminal_palette import load_palette
-        load_palette()   # creates default palette.json if missing
-        log.info("Terminal palette ready")
-    except Exception as e:
-        log.warning("Palette init error: %s", e)
 
     # ── Ensure lcd_state.json exists ──────────────────────────────────
     try:
