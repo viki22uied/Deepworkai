@@ -1082,7 +1082,40 @@ class Meter(QWidget):
 # ── Window ────────────────────────────────────────────────────────────────────
 # Hidden this long → exit to give memory back (DEEPWORKAI_UI_KEEPALIVE_MIN, 0 = never).
 import os as _os
-KEEPALIVE_S = float(_os.environ.get("DEEPWORKAI_UI_KEEPALIVE_MIN", "20")) * 60 or float("inf")
+KEEPALIVE_S = float(_os.environ.get("DEEPWORKAI_UI_KEEPALIVE_MIN", "0")) * 60 or float("inf")
+
+
+def _no_dwm_border(w: QWidget):
+    """Windows 11 draws a thin border and square corners around frameless windows; turn both off."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    hwnd = int(w.winId())
+    for attr, val in ((34, 0xFFFFFFFE), (33, 1)):   # DWMWA_BORDER_COLOR = none, CORNER = don't round
+        v = ctypes.c_uint(val)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+
+
+class Toast(QLabel):
+    """Small badge near the bottom of the screen: confirms a key press that has no window."""
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus
+                            | Qt.WindowType.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet("background:#111; color:#fff; border-radius:14px; padding:12px 22px;"
+                           "font-size:15px; font-weight:600;")
+        self._t = QTimer(self); self._t.setSingleShot(True); self._t.timeout.connect(self.hide)
+
+    def flash(self, text: str):
+        self.setText(text); self.adjustSize()
+        scr = QApplication.primaryScreen().availableGeometry()
+        self.move(scr.center().x() - self.width() // 2, scr.bottom() - self.height() - 80)
+        self.show(); self.raise_()
+        _no_dwm_border(self)
+        self._t.start(1800)
 
 
 class Hub(QWidget):
@@ -1098,8 +1131,11 @@ class Hub(QWidget):
         self._by_dial = False
         self._cmd_mtime = 0.0
         self.setWindowTitle("Deep Work AI")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        _no_dwm_border(self)
+        self.toast = Toast()
         self.resize(940 + 2 * self.SHADOW, 640 + 2 * self.SHADOW)
         self._drag: QPoint | None = None
         data = Data(demo)
@@ -1187,6 +1223,8 @@ class Hub(QWidget):
             return                                    # stale command from an earlier run
         if cmd.get("action") == "hide":
             self.hide(); return
+        if cmd.get("action") == "toast":
+            self.toast.flash(cmd.get("text", "")); return
         if cmd.get("action") == "show":
             self.present(cmd.get("tab", "focus"), cmd.get("focus_note", False),
                          cmd.get("by_dial", False))
