@@ -1,43 +1,26 @@
 /**
- * Deep Work AI — Logitech Plugin Entry Point (v2)
- * =================================================
- * 8 button actions + 1 dial = perfect for the MX Creative Console 3×3 keypad.
+ * Deep Work AI — Logitech Plugin Entry Point
+ * ==========================================
+ * The Rule of Three: three keys + one dial.
  *
- * Suggested button layout:
- *  [Capture]   [Restore]   [Focus Shield]
- *  [Meeting]   [Triage]    [Journal]
- *  [Queue]     [Rewind]    [---unused---]
- *  [←  Time Travel dial  →] [press = restore snapshot]
+ *   [ Focus ]  [ Resume ]  [ Inbox ]      ( Time Travel dial )
+ *
+ * Each key does several jobs via 1/2/3 presses — see src/test-actions.js.
  */
 
 import { PluginSDK } from '@logitech/plugin-sdk';
 
-import {
-  CaptureAction,
-  RestoreAction,
-  FocusShieldAction,
-  MeetingModeAction,
-  TriageAction,
-  JournalCaptureAction,
-  QueueAction,
-  CognitiveRewindAction,
-} from './src/test-actions.js';
-
+import { FocusKey, ResumeKey, InboxKey } from './src/test-actions.js';
 import { TimeTravelAction } from './src/adjustment-actions.js';
 import { log, ensureService, getProjectRoot } from './src/tcp-client.js';
 
 const pluginSDK = new PluginSDK();
 
-// ── Register 8 button actions + 1 dial ────────────────────────────────────────
+// ── Register 3 keys + 1 dial ──────────────────────────────────────────────────
 const ACTIONS = [
-  new CaptureAction(),        // Button 1
-  new RestoreAction(),        // Button 2
-  new FocusShieldAction(),    // Button 3
-  new MeetingModeAction(),    // Button 4
-  new TriageAction(),         // Button 5
-  new JournalCaptureAction(), // Button 6
-  new QueueAction(),          // Button 7
-  new CognitiveRewindAction(),// Button 8
+  new FocusKey(),
+  new ResumeKey(),
+  new InboxKey(),
   new TimeTravelAction(),     // Dial
 ];
 
@@ -45,7 +28,7 @@ for (const action of ACTIONS) {
   pluginSDK.registerAction(action);
 }
 
-log(`[PLUGIN] Deep Work AI v3.2.0 — ${ACTIONS.length} actions (8 buttons + dial)`);
+log(`[PLUGIN] Deep Work AI v3.2.0 — ${ACTIONS.length} actions (3 keys + dial)`);
 
 await pluginSDK.connect();
 

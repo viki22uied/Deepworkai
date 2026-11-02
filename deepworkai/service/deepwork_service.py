@@ -81,6 +81,7 @@ _VALID_COMMANDS = {
     "STATUS", "PING", "OPEN_TRASH",
     "WORKFLOW_STATUS", "WHERE_WAS_I", "INSIGHTS",
     "AUTO_CAPTURE_ON", "AUTO_CAPTURE_OFF", "RELEASE_HELD",
+    "RESUME", "HUB",
 }
 _VALID_PREFIX_COMMANDS = {
     "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK",
@@ -215,6 +216,8 @@ def _handle_rewind(minutes_str: str) -> str:
 
 
 def _handle_shield_on() -> str:
+    # Rule of three: entering focus saves the workspace first (in background).
+    threading.Thread(target=_handle_capture, daemon=True, name="ShieldCapture").start()
     slack.init()
     result = slack.shield_on(duration_minutes=90)
     _shield_state.update({"active": True, "since": datetime.now().isoformat()})
@@ -439,6 +442,24 @@ def _intel():
     return wi
 
 
+def _handle_resume() -> str:
+    """Resume key: restore the last workspace and show 'where was I'."""
+    result = _handle_restore()
+    _handle_triage_show("focus")
+    return result.replace("RESTORE", "RESUME", 1)
+
+
+def _handle_hub() -> str:
+    """Inbox key: open the Hub on Inbox if anything is waiting, else Focus."""
+    waiting = 0
+    try:
+        from deepworkai.features.notification_classifier import count_by_priority
+        waiting = sum(count_by_priority().values())
+    except Exception:
+        pass
+    return _handle_triage_show("inbox" if waiting else "focus").replace("TRIAGE_SHOW", "HUB", 1)
+
+
 def _handle_workflow_status() -> str:
     wi = _intel()
     return "OK WORKFLOW " + json.dumps(wi.current_state().to_dict())
@@ -515,6 +536,8 @@ def handle_command(raw: str) -> str:
         # Notif
         if command == "NOTIF_ADD":        return _handle_notif_add(arg)
         # Status
+        if command == "RESUME":           return _handle_resume()
+        if command == "HUB":              return _handle_hub()
         if command == "WORKFLOW_STATUS":  return _handle_workflow_status()
         if command == "WHERE_WAS_I":      return _handle_where_was_i()
         if command == "INSIGHTS":         return _handle_insights()
