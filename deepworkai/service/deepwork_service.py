@@ -55,7 +55,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 HOST = "127.0.0.1"
 PORT = 57321
 MAX_CMD_BYTES = 4096
-RECV_TIMEOUT  = 10
+RECV_TIMEOUT  = 2      # a client must send its line quickly (slow clients can't hog slots)
 
 LOG_FILE = DATA_DIR / "service.log"
 logging.basicConfig(
@@ -68,7 +68,6 @@ log = logging.getLogger("deepwork_service")
 # ── State ──────────────────────────────────────────────────────────────────────
 _shield_state:  dict = {"active": False}
 _service_start: float = time.time()
-_triage_proc   = None   # Popen handle for triage dashboard
 _haptic_clients: list  = []  # websocket/plugin connections wanting haptic events
 
 # ── Command allowlist ──────────────────────────────────────────────────────────
@@ -284,25 +283,44 @@ def _handle_shield_toggle() -> str:
     return _handle_shield_off() if _shield_state.get("active") else _handle_shield_on()
 
 
-def _handle_triage_show(tab: str = "inbox") -> str:
-    global _triage_proc
-    if _triage_proc and _triage_proc.poll() is None:
-        _triage_proc.terminate()          # reopen on the requested tab
-    script = PROJECT_ROOT / "deepworkai" / "features" / "triage_dashboard.py"
-    if not script.exists():
-        return f"ERROR TRIAGE_SHOW missing {script}"
+# ── The one UI (Hub) ───────────────────────────────────────────────────────────
+# A single persistent PyQt process, started hidden at service start so it opens
+# instantly. The service tells it what to show via data/ui_cmd.json.
+UI_CMD = DATA_DIR / "ui_cmd.json"
+_ui_proc = None
+
+
+def _ui_ensure():
+    """Start the Hub in the background if it isn't running (it keeps itself single)."""
+    global _ui_proc
+    if _ui_proc and _ui_proc.poll() is None:
+        return
+    pythonw = Path(sys.executable).parent / "pythonw.exe"
+    interp  = str(pythonw) if pythonw.exists() else sys.executable
     try:
-        pythonw = Path(sys.executable).parent / "pythonw.exe"
-        interp  = str(pythonw) if pythonw.exists() else sys.executable
-        _triage_proc = subprocess.Popen(
-            [interp, str(script), "--tab", tab],
-            cwd=str(PROJECT_ROOT),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+        _ui_proc = subprocess.Popen(
+            [interp, "-m", "deepworkai.ui.hub", "--background"], cwd=str(PROJECT_ROOT),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        return f"OK TRIAGE_SHOW pid={_triage_proc.pid}"
     except Exception as e:
-        return f"ERROR TRIAGE_SHOW {e}"
+        log.warning("[UI] could not start Hub: %s", e)
+
+
+def _ui(tab: str = "focus", **extra) -> str:
+    cmd = {"action": "show", "tab": tab, "ts": time.time(), **extra}
+    try:
+        tmp = UI_CMD.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cmd))
+        tmp.replace(UI_CMD)
+    except Exception as e:
+        return f"ERROR UI {e}"
+    _ui_ensure()
+    return f"OK UI {tab}"
+
+
+def _handle_triage_show(tab: str = "inbox") -> str:
+    return _ui(tab).replace("UI", "TRIAGE_SHOW", 1)
 
 
 # Meeting Mode
@@ -331,9 +349,10 @@ def _handle_anchor_restore() -> str:
 
 # Journal
 def _handle_journal_capture() -> str:
-    from deepworkai.features.micro_journal import launch_overlay
-    launch_overlay()
-    return "OK JOURNAL_CAPTURE overlay launched"
+    """Open the Hub with the next-step box focused (one UI, no extra popup)."""
+    _ui("focus", focus_note=True)
+    return "OK JOURNAL_CAPTURE"
+
 
 def _handle_journal_save(text: str) -> str:
     from deepworkai.features.micro_journal import save_note
@@ -504,7 +523,7 @@ def _handle_hub() -> str:
 TRAVEL_FILE = DATA_DIR / "timetravel.json"
 TRAVEL_SPAN = 40                              # snapshots reachable on the dial
 _travel = {"items": [], "index": -1, "open": False}
-_travel_proc = None
+_travel_lock = threading.RLock()
 
 
 def _travel_write(**extra):
@@ -519,22 +538,15 @@ def _travel_write(**extra):
 
 
 def _travel_show_overlay():
-    global _travel_proc
-    if _travel_proc and _travel_proc.poll() is None:
-        return
-    pythonw = Path(sys.executable).parent / "pythonw.exe"
-    interp  = str(pythonw) if pythonw.exists() else sys.executable
-    try:
-        _travel_proc = subprocess.Popen(
-            [interp, "-m", "deepworkai.ui.timetravel"], cwd=str(PROJECT_ROOT),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        log.warning("[TRAVEL] overlay failed: %s", e)
+    _ui("timeline", by_dial=True)
 
 
 def _travel_step(tick: int) -> str:
+    with _travel_lock:
+        return _travel_step_locked(tick)
+
+
+def _travel_step_locked(tick: int) -> str:
     """Counter-clockwise (tick<0) = further back; clockwise = towards now."""
     if not _travel["open"]:
         _travel["items"] = core.get_recent_snapshots(limit=TRAVEL_SPAN)
@@ -557,6 +569,11 @@ def _travel_restore(cid: str) -> str:
 
 
 def _handle_travel_commit() -> str:
+    with _travel_lock:
+        return _handle_travel_commit_locked()
+
+
+def _handle_travel_commit_locked() -> str:
     """Dial stopped: restore the selected moment (or cancel if on 'Now')."""
     if not _travel["open"]:
         return "OK TRAVEL idle"
@@ -570,6 +587,11 @@ def _handle_travel_commit() -> str:
 
 
 def _handle_travel_go(cid: str) -> str:
+    with _travel_lock:
+        return _handle_travel_go_locked(cid)
+
+
+def _handle_travel_go_locked(cid: str) -> str:
     """Overlay click: restore a specific snapshot."""
     _travel["open"] = False
     _travel_write(result="restore", restored=cid)
@@ -577,6 +599,11 @@ def _handle_travel_go(cid: str) -> str:
 
 
 def _handle_travel_close() -> str:
+    with _travel_lock:
+        return _handle_travel_close_locked()
+
+
+def _handle_travel_close_locked() -> str:
     _travel["open"] = False
     _travel_write(result="cancel")
     return "OK TRAVEL closed"
@@ -725,6 +752,48 @@ def handle_command(raw: str) -> str:
     return f"ERROR UNHANDLED {command}"
 
 
+# ── Session key (local auth) ──────────────────────────────────────────────────
+# Every command except PING must be prefixed with "@<key> ". The key is random
+# per service start and stored in data/.session_key readable only by this user,
+# so other accounts on the PC (or anything that can't read your files) can't
+# drive the service.
+KEY_FILE = DATA_DIR / ".session_key"
+_SESSION_KEY = ""
+_conn_slots = threading.BoundedSemaphore(32)       # cap concurrent clients
+
+
+def _init_session_key():
+    global _SESSION_KEY
+    import secrets
+    _SESSION_KEY = secrets.token_hex(24)
+    tmp = KEY_FILE.with_suffix(".tmp")
+    tmp.write_text(_SESSION_KEY)
+    try:
+        os.chmod(tmp, 0o600)
+        if os.name == "nt":                          # restrict to the current user
+            user = os.environ.get("USERNAME", "")
+            if user:
+                subprocess.run(["icacls", str(tmp), "/inheritance:r", "/grant:r", f"{user}:F"],
+                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                               timeout=5)
+    except Exception as e:
+        log.warning("[AUTH] could not restrict key file: %s", e)
+    tmp.replace(KEY_FILE)
+
+
+def _authorize(raw: str) -> tuple[bool, str]:
+    """Strip and verify the '@key ' prefix. PING is always allowed (health check)."""
+    import hmac
+    line = raw.strip()
+    if line.upper() == "PING":
+        return True, line
+    if line.startswith("@"):
+        key, _, rest = line[1:].partition(" ")
+        if _SESSION_KEY and hmac.compare_digest(key, _SESSION_KEY):
+            return True, rest
+    return False, line
+
+
 # ── TCP Server ────────────────────────────────────────────────────────────────
 def _handle_client(conn: socket.socket):
     try:
@@ -740,7 +809,12 @@ def _handle_client(conn: socket.socket):
         if not data:
             return
         raw      = data.decode("utf-8", errors="ignore").split("\n")[0]
-        response = handle_command(raw)
+        ok, cmd  = _authorize(raw)
+        if ok:
+            response = handle_command(cmd)
+        else:
+            log.warning("[AUTH] rejected unauthenticated command")
+            response = "ERROR AUTH"
         conn.sendall((response + "\n").encode("utf-8"))
     except socket.timeout:
         pass
@@ -757,6 +831,7 @@ def main():
     log.info("=" * 60)
     log.info("Deep Work AI Service v2 — port %d", PORT)
 
+    _init_session_key()
     core.init_db()
     slack.init()
 
@@ -781,6 +856,7 @@ def main():
         log.error("[INTEL] failed to start: %s", e)
 
     threading.Thread(target=_auto_snapshot_loop, daemon=True, name="AutoSnapshot").start()
+    _ui_ensure()                              # pre-warm the UI so the first press is instant
 
     # Blocker Radar, Git Pulse, Debug watcher, palette — run here so they work
     # no matter how the service was started (plugin auto-spawn or start.py).
@@ -817,13 +893,23 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT,  _shutdown)
 
+    serve_forever(server)
+
+
+def serve_forever(server: socket.socket):
     while True:
         try:
             conn, addr = server.accept()
-            threading.Thread(
-                target=_handle_client, args=(conn,),
-                daemon=True, name=f"Client-{addr[1]}",
-            ).start()
+            if not _conn_slots.acquire(blocking=False):
+                conn.close()                         # too many clients — shed load
+                continue
+
+            def _run(c=conn):
+                try:
+                    _handle_client(c)
+                finally:
+                    _conn_slots.release()
+            threading.Thread(target=_run, daemon=True, name=f"Client-{addr[1]}").start()
         except OSError:
             break
         except Exception as e:
