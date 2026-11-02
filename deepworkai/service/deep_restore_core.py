@@ -380,11 +380,11 @@ def _read_browser_tabs(browser_exe: str) -> list[dict]:
     code scraped every URL out of Sessions/Tabs_* — Chromium's *recently
     closed* list — which restored tabs closed days or months ago.
     """
-    from chromium_session import read_open_tabs
+    from chromium_session import read_open_tabs, strip_secret_params
     session_dir = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
     if not session_dir:
         return []
-    urls = read_open_tabs(session_dir)[:_MAX_TABS_PER_BROWSER]
+    urls = [strip_secret_params(u) for u in read_open_tabs(session_dir)[:_MAX_TABS_PER_BROWSER]]
     log.info("[CAPTURE] %s: %d open tabs captured", browser_exe, len(urls))
     return [{"url": u, "title": u} for u in urls]
 

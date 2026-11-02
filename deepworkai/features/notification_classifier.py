@@ -8,10 +8,10 @@ to surface immediately vs hold until the session ends.
 Architecture
 ------------
 1. Rule-based fast path   — catches obvious patterns first (regex + keywords)
-2. TF-IDF + LogisticReg  — sklearn model trained on bootstrap labels
+2. TF-IDF + LogisticReg  — tiny pure-Python model (tiny_ml) trained on bootstrap labels
 3. Confidence threshold   — anything < 60 % confidence falls back to MEDIUM
 
-Dependencies: sklearn (optional) — falls back to pure rules if not installed.
+Dependencies: none (no scikit-learn/numpy — keeps the service light).
 """
 
 from __future__ import annotations
@@ -189,54 +189,34 @@ _model_trained = False
 
 
 def _build_model():
-    """Train TF-IDF + LogisticRegression on bootstrap + stored labelled items."""
+    """Train TF-IDF + logistic regression on bootstrap + your own labelled items.
+    Pure Python (tiny_ml) — scikit-learn cost ~130 MB of RAM for this."""
     global _model, _vectorizer, _model_trained
     try:
-        from sklearn.pipeline import Pipeline
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.feature_extraction.text import TfidfVectorizer
-
-        texts, labels = zip(*_BOOTSTRAP_DATA)  # type: ignore[misc]
-
-        # Add any user-labelled items from the DB
+        from deepworkai.features.tiny_ml import TinyTextClassifier
+        texts, labels = (list(x) for x in zip(*_BOOTSTRAP_DATA))
         try:
             labelled = _get_labelled_from_db()
             if labelled:
-                extra_t, extra_l = zip(*labelled)
-                texts  = list(texts) + list(extra_t)
-                labels = list(labels) + list(extra_l)
+                extra_t, extra_l = zip(*labelled[-2000:])      # bounded: memory + training time
+                texts += list(extra_t); labels += list(extra_l)
         except Exception:
             pass
-
-        pipeline = Pipeline([
-            ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
-                                      sublinear_tf=True)),
-            ("clf",   LogisticRegression(max_iter=300, C=1.5,
-                                         class_weight="balanced")),
-        ])
-        pipeline.fit(texts, labels)
-        _model = pipeline
+        _model = TinyTextClassifier().fit(texts, labels)
         _model_trained = True
-        log.info("[CLASSIFIER] sklearn model trained on %d samples", len(texts))
-    except ImportError:
-        log.info("[CLASSIFIER] sklearn not installed — using rule-based classifier only")
+        log.info("[CLASSIFIER] model trained on %d samples", len(texts))
     except Exception as e:
         log.warning("[CLASSIFIER] Model training failed: %s", e)
 
 
 def _sklearn_classify(text: str) -> tuple[str, float]:
-    """Return (priority, confidence) from the sklearn model."""
-    global _model, _model_trained
+    """Return (priority, confidence) from the local model."""
     if not _model_trained:
         _build_model()
     if _model is None:
-        return MEDIUM, 0.5   # sklearn unavailable
-
+        return MEDIUM, 0.5
     try:
-        proba = _model.predict_proba([text])[0]
-        classes = _model.classes_
-        idx = proba.argmax()
-        return classes[idx], float(proba[idx])
+        return _model.predict(text)
     except Exception:
         return MEDIUM, 0.5
 
@@ -456,8 +436,7 @@ def inject_notification(source: str, title: str, body: str, url: str = "",
     except Exception as e:
         log.debug("[CLASSIFIER] routing unavailable: %s", e)
     save_notification(n)
-    log.info("[CLASSIFIER] %s [%s %.0f%%] from %s: %s",
-             n.source, n.priority, n.confidence * 100, n.sender or "?", n.title[:60])
+    log.info("[CLASSIFIER] %s [%s %.0f%%]", n.source, n.priority, n.confidence * 100)   # no content in logs
     return n
 
 

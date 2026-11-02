@@ -277,6 +277,10 @@ def purge_old(days: int = RETENTION_DAYS):
         if ACTIVITY_DB.exists():
             with sqlite3.connect(ACTIVITY_DB, timeout=5) as c:
                 c.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
+        notif_db = DATA_DIR / "notifications.db"
+        if notif_db.exists():                       # message bodies don't live forever either
+            with sqlite3.connect(notif_db, timeout=5) as c:
+                c.execute("DELETE FROM notifications WHERE arrived_at < ?", (cutoff,))
     except Exception as e:
         log.debug("purge failed: %s", e)
 

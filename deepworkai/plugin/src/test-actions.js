@@ -20,7 +20,7 @@
  */
 
 import { CommandAction } from '@logitech/plugin-sdk';
-import { ensureService, sendCommand, log } from './tcp-client.js';
+import { ensureService, sendCommand, log, summarize } from './tcp-client.js';
 
 const PRESS_WINDOW_MS = 350;
 
@@ -29,7 +29,7 @@ function run(name, cmd) {
     try {
       await ensureService();
       const r = await sendCommand(cmd);
-      log(`[ACTION] ${name} → ${r}`);
+      log(`[ACTION] ${name} → ${summarize(r)}`);
     } catch (e) {
       log(`[ACTION] ${name} FAILED: ${e.message}`);
     }

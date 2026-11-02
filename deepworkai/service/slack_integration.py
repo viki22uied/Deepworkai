@@ -40,25 +40,12 @@ _dnd_active: bool = False      # module-level shield state
 
 
 def _load_token() -> str:
-    """Load SLACK_TOKEN from .env file or environment variable."""
-    # 1. Check live environment
-    token = os.environ.get("SLACK_TOKEN", "")
-    if token:
-        return token
-
-    # 2. Parse .env file
-    # Look in project root
-    env_file = BASE_DIR / ".env"
-    if env_file.exists():
-        try:
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line.startswith("SLACK_TOKEN=") and not line.startswith("#"):
-                    token = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    return token
-        except Exception:
-            pass
-    return ""
+    """SLACK_TOKEN from the environment or the encrypted vault (legacy .env still read)."""
+    try:
+        from secrets_store import get
+    except ImportError:
+        from deepworkai.service.secrets_store import get
+    return get("SLACK_TOKEN")
 
 
 def init():
@@ -236,7 +223,7 @@ def post_focus_status(project_name: str = "") -> bool:
         }
     })
     if data.get("ok"):
-        log.info("[SLACK] Status set: %s", status_text)
+        log.info("[SLACK] Status set")
         return True
     return False
 

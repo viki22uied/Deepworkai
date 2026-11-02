@@ -14,7 +14,7 @@
  */
 
 import { AdjustmentAction } from '@logitech/plugin-sdk';
-import { sendCommand, log } from './tcp-client.js';
+import { sendCommand, log, summarize } from './tcp-client.js';
 
 const COMMIT_MS = 2500;      // pause long enough to read the card, short enough to feel instant
 
@@ -25,7 +25,7 @@ function scheduleCommit() {
   clearTimeout(_commitTimer);
   _commitTimer = setTimeout(async () => {
     try {
-      log(`[DIAL] ${await sendCommand('TRAVEL_COMMIT')}`);
+      log(`[DIAL] ${summarize(await sendCommand('TRAVEL_COMMIT'))}`);
     } catch (e) {
       log(`[DIAL] commit failed: ${e.message}`);
     }
@@ -49,7 +49,7 @@ export class TimeTravelAction extends AdjustmentAction {
   async _route(tick) {
     try {
       const r = await sendCommand(`DIAL:${tick}`);
-      log(`[DIAL] ${r}`);
+      log(`[DIAL] ${summarize(r)}`);
       if (r.includes('travel') && !r.includes('noop')) scheduleCommit();
       else clearTimeout(_commitTimer);          // debugger consumed it
     } catch (e) {

@@ -35,7 +35,8 @@ from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen
 from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget)
 
 from deepworkai.ui import hub
-from deepworkai.ui.hub import (ACTIVITY, SYS, T, Icon, capsule, card, clear, font, label, _q)
+from deepworkai.ui.hub import (ACTIVITY, SYS, T, Badge, HatchCard, Icon, big, capsule, card, clear, font,
+                                label, overline, _q)
 
 DATA = ROOT / "data"
 STATE = DATA / "timetravel.json"
@@ -90,6 +91,8 @@ class Moments:
         if cid in self.cache:
             return self.cache[cid]
         m = self._demo(cid) if self.demo else self._load(cid)
+        if len(self.cache) >= 120:                 # bounded: never grows with history
+            self.cache.pop(next(iter(self.cache)))
         self.cache[cid] = m
         return m
 
@@ -224,8 +227,8 @@ class Rail(QWidget):
 class Countdown(QWidget):
     def __init__(self):
         super().__init__()
-        self.frac, self.color = 0.0, QColor(SYS["blue"])
-        self.setFixedHeight(4)
+        self.frac, self.color = 0.0, QColor(T["text"])
+        self.setFixedHeight(3)
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -255,18 +258,14 @@ class TimelinePage(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         body = QVBoxLayout(self); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(14)
-        head = QHBoxLayout()
-        self.when = label("", 22, QFont.Weight.DemiBold, display=True)
-        self.ago = label("", 14, QFont.Weight.Medium, T["text2"])
-        head.addWidget(self.when); head.addSpacing(10)
-        head.addWidget(self.ago, 0, Qt.AlignmentFlag.AlignBottom); head.addStretch()
-        body.addLayout(head)
+        # time is shown big inside the card — no duplicate header
+        self.when = QLabel(); self.ago = QLabel()
 
         main = QHBoxLayout(); main.setSpacing(18)
         self.rail = Rail(self._click)
         railbox = QVBoxLayout(); railbox.addWidget(self.rail); railbox.addStretch()
         main.addLayout(railbox, 0)
-        self.detail, self.dl = card(22, 12)
+        self.detail = HatchCard(32, 10); self.dl = self.detail.lay
         main.addWidget(self.detail, 1)
         body.addLayout(main, 1)
 
@@ -366,74 +365,68 @@ class TimelinePage(QWidget):
         self.rail.set_rows(rows)
 
         clear(self.dl)
+        P, P2 = T["on_primary"], T["on_primary2"]
         if idx < 0 or idx >= len(ids):
             self.when.setText("Now")
             self.ago.setText(_plural(len(ids), "saved moment") if ids else "")
+            self.dl.addWidget(capsule("Time travel", on_primary=True))
+            self.dl.addSpacing(8)
+            self.dl.addWidget(big("Now", 76, P))
             self.dl.addStretch()
-            ic = QHBoxLayout(); ic.addStretch(); ic.addWidget(Icon("clock", SYS["green"], 52, 1.4, tile=True)); ic.addStretch()
-            self.dl.addLayout(ic)
-            msg = ("Turn the dial left, scroll, or press ↓ to walk back through your day. "
-                   "Each stop shows what you were doing." if ids else
-                   "No saved moments yet. They're captured automatically every 10 minutes while you "
-                   "work, when you start focusing, and when you save your spot.")
-            for txt, px, wt, col in (("You're in the present", 20, QFont.Weight.DemiBold, None),
-                                     (msg, 13, QFont.Weight.Normal, T["text2"])):
-                l = label(txt, px, wt, col, display=px > 15, wrap=True)
-                l.setAlignment(Qt.AlignmentFlag.AlignCenter); self.dl.addWidget(l)
-            self.dl.addStretch()
+            self.dl.addWidget(label(
+                "Turn the dial left, scroll, or press ↓ to walk back through your day. "
+                "Each stop shows what you were doing." if ids else
+                "No saved moments yet. They're captured automatically every 10 minutes while you "
+                "work, when you start focusing, and when you save your spot.", 14, color=P2, wrap=True))
             return
 
         m = self.moments.get(ids[idx])
         clock, ago = _when(m["ts"])
         self.when.setText(clock)
         self.ago.setText(ago)
-        name, icon, color = ACTIVITY.get(m["activity"], ACTIVITY["idle"])
-        self.bar.color = QColor(color)
+        name = ACTIVITY.get(m["activity"], ACTIVITY["idle"])[0]
+        self.bar.color = QColor(T["text"])
 
-        top = QHBoxLayout(); top.setSpacing(12)
-        top.addWidget(Icon(icon, color, 44, 1.5, tile=True))
-        tc = QVBoxLayout(); tc.setSpacing(2)
-        tc.addWidget(label(f"You were {name.lower()}" if m["activity"] != "idle" else "Away / idle",
-                           22, QFont.Weight.DemiBold, display=True))
-        meta = " · ".join(x for x in (m.get("repo"), m.get("branch")) if x)
-        tc.addWidget(label(meta or SOURCE_LABEL.get(m["source"], "Saved moment"), 13, color=T["text2"]))
-        top.addLayout(tc, 1)
+        top = QHBoxLayout(); top.setSpacing(8)
+        top.addWidget(capsule(f"You were {name.lower()}" if m["activity"] != "idle" else "Away", on_primary=True))
+        top.addWidget(capsule(SOURCE_LABEL.get(m["source"], (m["source"] or "saved").title()), on_primary=True))
+        top.addStretch()
+        self.dl.addLayout(top)
+        self.dl.addSpacing(8)
+        hm, _, ampm = clock.rpartition(" ")
+        row = QHBoxLayout(); row.setSpacing(10)
+        row.addWidget(big(hm or clock, 76, P))
+        if hm:
+            row.addWidget(label(ampm, 18, QFont.Weight.Normal, P2), 0, Qt.AlignmentFlag.AlignBottom)
+        row.addStretch()
         if m.get("focus") is not None:
             f = QVBoxLayout(); f.setSpacing(0)
-            v = label(str(m["focus"]), 26, QFont.Weight.DemiBold, color, display=True)
-            v.setAlignment(Qt.AlignmentFlag.AlignRight); f.addWidget(v)
-            k = label("focus", 11, QFont.Weight.Medium, T["text3"]); k.setAlignment(Qt.AlignmentFlag.AlignRight)
-            f.addWidget(k); top.addLayout(f)
-        self.dl.addLayout(top)
+            v = big(str(m["focus"]), 34, P); v.setAlignment(Qt.AlignmentFlag.AlignRight); f.addWidget(v)
+            k = overline("focus", P2); k.setAlignment(Qt.AlignmentFlag.AlignRight); f.addWidget(k)
+            row.addLayout(f)
+        self.dl.addLayout(row)
+        meta = " · ".join(x for x in (m.get("repo"), m.get("branch")) if x)
+        counts = " · ".join(x for x in (_plural(m["n_windows"], "window") if m.get("n_windows") else "",
+                                        _plural(m["n_tabs"], "tab") if m.get("n_tabs") else "") if x)
+        self.dl.addWidget(label(" — ".join(x for x in (ago, meta, counts) if x), 14, color=P2, wrap=True))
+        self.dl.addSpacing(10)
 
-        tags = QHBoxLayout(); tags.setSpacing(6)
-        tags.addWidget(capsule(SOURCE_LABEL.get(m["source"], (m["source"] or "saved").title()), SYS["gray"]))
-        if m.get("n_windows"):
-            tags.addWidget(capsule(_plural(m['n_windows'], "window"), SYS["indigo"]))
-        if m.get("n_tabs"):
-            tags.addWidget(capsule(_plural(m['n_tabs'], "tab"), SYS["teal"]))
-        tags.addStretch()
-        self.dl.addLayout(tags)
-
-        def section(ic, title, lines, col):
+        def section(title, lines):
             if not lines:
                 return
-            self.dl.addSpacing(2)
-            r = QHBoxLayout(); r.setSpacing(7)
-            r.addWidget(Icon(ic, col, 14, 1.7))
-            r.addWidget(label(title, 11, QFont.Weight.DemiBold, T["text3"], caps=True)); r.addStretch()
-            self.dl.addLayout(r)
+            self.dl.addSpacing(4)
+            self.dl.addWidget(overline(title, P2))
             for ln in lines:
-                self.dl.addWidget(label(ln, 13.5, color=T["text"], wrap=True))
+                self.dl.addWidget(label(ln, 14, color=P, wrap=True))
 
-        section("pencil", "Your note", [m["note"]] if m.get("note") else [], SYS["orange"])
+        section("Your note", [m["note"]] if m.get("note") else [])
         changed = m.get("changed", [])
         own = m.get("file")
         files = ([own] if own and not any(c.endswith(own) for c in changed) else []) + changed
-        section("code", "Files", files[:4], SYS["blue"])
-        section("book", "Tabs", m.get("tabs", []), SYS["teal"])
+        section("Files", files[:4])
+        section("Tabs", m.get("tabs", []))
         if not (m.get("note") or files or m.get("tabs")) and m.get("apps"):
-            section("folder", "Open apps", [", ".join(m["apps"])], SYS["gray"])
+            section("Open apps", [", ".join(m["apps"])])
         self.dl.addStretch()
 
     def _finish(self, st):
@@ -441,7 +434,7 @@ class TimelinePage(QWidget):
             m = self.moments.get(st.get("restored", ""))
             clock, _ = _when(m.get("ts", ""))
             self.hint.setText(f"✓ Restoring your workspace from {clock}")
-            self.bar.frac, self.bar.color = 1.0, QColor(SYS["green"])
+            self.bar.frac, self.bar.color = 1.0, QColor(T["text"])
             self.bar.update()
             self._finishing_until = time.time() + 1.4
         else:

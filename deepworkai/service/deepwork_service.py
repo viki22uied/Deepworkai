@@ -683,10 +683,10 @@ def handle_command(raw: str) -> str:
     try:
         command, arg = _validate_command(raw)
     except ValueError as e:
-        log.warning("[CMD] Rejected: %s — %s", raw[:80], e)
+        log.warning("[CMD] Rejected: %s", str(e).split(":")[0])     # never log the payload
         return f"ERROR INVALID_COMMAND {e}"
 
-    log.info("[CMD] %s %s", command, arg[:60] if arg else "")
+    log.info("[CMD] %s", command)                                 # args may hold notes/text
     try:
         # Workspace
         if command == "CAPTURE":          return _handle_capture()
@@ -762,6 +762,28 @@ _SESSION_KEY = ""
 _conn_slots = threading.BoundedSemaphore(32)       # cap concurrent clients
 
 
+def _lock_data_dir():
+    """Only the current Windows user may read data/ (snapshots, notes, notifications, vault)."""
+    try:
+        os.chmod(DATA_DIR, 0o700)
+        if os.name == "nt":
+            user = os.environ.get("USERNAME", "")
+            if user:
+                subprocess.run(["icacls", str(DATA_DIR), "/inheritance:r", "/grant:r",
+                                f"{user}:(OI)(CI)F", "/T", "/Q"],
+                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
+    except Exception as e:
+        log.warning("[SECURITY] could not restrict data folder: %s", e)
+    try:
+        from secrets_store import plaintext_secrets_in_env
+        leaked = plaintext_secrets_in_env()
+        if leaked:
+            log.warning("[SECURITY] %s stored in plain text in .env — run: "
+                        "python -m deepworkai.service.secrets_store import-env", ", ".join(leaked))
+    except Exception:
+        pass
+
+
 def _init_session_key():
     global _SESSION_KEY
     import secrets
@@ -831,6 +853,7 @@ def main():
     log.info("=" * 60)
     log.info("Deep Work AI Service v2 — port %d", PORT)
 
+    _lock_data_dir()
     _init_session_key()
     core.init_db()
     slack.init()

@@ -25,28 +25,9 @@ log = logging.getLogger("notification_interceptor")
 # ── Config helpers ─────────────────────────────────────────────────────────────
 _BASE_DIR = Path(__file__).parent.parent.parent
 
-def _load_env() -> dict:
-    """Load .env file into a dict (supplements os.environ)."""
-    env: dict = {}
-    env_file = _BASE_DIR / ".env"
-    if env_file.exists():
-        try:
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                env[k.strip()] = v.strip().strip('"').strip("'")
-        except Exception:
-            pass
-    return env
-
-
-_ENV = _load_env()
-
-
 def _cfg(key: str, default: str = "") -> str:
-    return os.environ.get(key, _ENV.get(key, default))
+    from deepworkai.service.secrets_store import get
+    return get(key, default)
 
 
 # ── State ─────────────────────────────────────────────────────────────────────
@@ -154,7 +135,7 @@ def _ingest_github(items: list):
         )
         if n.priority == HIGH:
             _new_high_count += 1
-            log.info("[INTERCEPTOR] HIGH GitHub: %s", title[:80])
+            log.info("[INTERCEPTOR] HIGH GitHub notification")
 
 
 # ── Jira ──────────────────────────────────────────────────────────────────────
@@ -213,7 +194,7 @@ def _ingest_jira(issues: list):
         )
         if n.priority == HIGH:
             _new_high_count += 1
-            log.info("[INTERCEPTOR] HIGH Jira: %s", title[:80])
+            log.info("[INTERCEPTOR] HIGH Jira notification")
 
 
 def _adf_to_text(adf: dict, depth: int = 0) -> str:
@@ -297,7 +278,7 @@ def _ingest_slack(messages: list):
         )
         if n.priority == HIGH:
             _new_high_count += 1
-            log.info("[INTERCEPTOR] HIGH Slack: %s", title[:80])
+            log.info("[INTERCEPTOR] HIGH Slack notification")
 
 
 # ── Manual inject (for testing / service command) ─────────────────────────────
