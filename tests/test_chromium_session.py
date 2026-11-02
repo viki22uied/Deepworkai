@@ -107,7 +107,7 @@ def test_closed_browser_that_reopens_its_session_gets_only_missing_tabs(monkeypa
     import deep_restore_core as core
     launched = []
     monkeypatch.setattr(core, "find_exe", lambda n: "brave")
-    monkeypatch.setattr(core.psutil, "process_iter", lambda *a, **k: [])          # not running
+    monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {})                       # no window open
     monkeypatch.setattr(core, "_read_browser_tabs", lambda b: ([{"url": "https://a.example/"}], []))
     monkeypatch.setattr(core, "_browser_restored_itself", lambda b: True)
     monkeypatch.setattr(core.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))

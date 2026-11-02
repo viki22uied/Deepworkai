@@ -793,10 +793,9 @@ def launch_browser(browser_exe: str, tabs: list) -> bool:
         log.warning("[RESTORE] Cannot find exe for browser: %s", browser_exe)
         return False
 
-    # Check if browser is already running
-    running_names = {p.info["name"].lower()
-                     for p in psutil.process_iter(["name"])}
-    browser_running = browser_lower in running_names
+    # "Open" means it has a window: Edge (startup boost) and Brave keep running in the
+    # background after you close them, and treating that as open restored nothing.
+    browser_running = browser_lower in _snapshot_hwnds()
 
     # ── De-duplicate: only open tabs NOT already visible ────────────────────
     if browser_running:
@@ -1001,8 +1000,7 @@ def restore_workspace(snapshot: dict, label: str = ""):
                  "(captured from the recently-closed list, not open tabs)")
         browsers = {}
 
-    running = {p.info["name"].lower()
-               for p in psutil.process_iter(["name"])}
+    running = set(_snapshot_hwnds())          # apps with a window right now
 
     # Tabs that were locked at capture: readable now if that browser has since closed.
     browsers = dict(browsers)
@@ -1016,10 +1014,18 @@ def restore_workspace(snapshot: dict, label: str = ""):
     log.info("[RESTORE] Starting. %d windows, %d browsers, label=%s",
              len(windows), len(browsers), label)
 
-    # ── Phase 1: Browsers (fast — max 5 tabs each, opened in one call) ────────
+    # ── Phase 1: Browsers ─────────────────────────────────────────────────────
     for browser, tabs in browsers.items():
         if tabs:
             launch_browser(browser, tabs)
+    # A browser that had windows but no readable tabs: start it, it reopens its own session.
+    for b in {w.get("process", "").lower() for w in windows if w.get("is_browser")}:
+        if b and b not in running and not browsers.get(b):
+            exe = find_exe(b)
+            if exe:
+                subprocess.Popen([exe], creationflags=subprocess.CREATE_NO_WINDOW)
+                browsers[b] = [None]              # so phase 3 waits for its window
+                log.info("[RESTORE] Started %s (it reopens its own tabs)", b)
 
     # ── Phase 2: Desktop apps ─────────────────────────────────────────────────
     # Count how many instances of each app we have running vs what we need
