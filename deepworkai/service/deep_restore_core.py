@@ -610,6 +610,29 @@ def load_snapshot_before(minutes: int) -> tuple[dict | None, str, str]:
         return None, "", ""
 
 
+def load_snapshot_by_id(cid: str) -> tuple[dict | None, str, str]:
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        row = conn.execute("SELECT workspace_json, timestamp, summary FROM capsules WHERE id=?",
+                           (cid,)).fetchone()
+        conn.close()
+        return (json.loads(row[0]), row[1], row[2] or "") if row else (None, "", "")
+    except Exception as e:
+        log.error("[DB] load_snapshot_by_id error: %s", e)
+        return None, "", ""
+
+
+def prune_auto_snapshots(days: int = 14):
+    """Delete automatic snapshots older than `days` (manual ones are kept)."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.execute("DELETE FROM capsules WHERE name='auto' AND timestamp < ?", (cutoff,))
+        conn.commit(); conn.close()
+    except Exception as e:
+        log.debug("[DB] prune error: %s", e)
+
+
 def get_recent_snapshots(limit: int = 10) -> list[dict]:
     """Return last `limit` snapshot metadata records (no workspace JSON)."""
     try:
