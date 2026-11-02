@@ -30,4 +30,8 @@ Run { npm ci }
 Run { npm run build:prod }
 Run { npx logitoolkit pack } -Show
 Pop-Location
-Get-ChildItem deepworkai/plugin/*.lplug4 | ForEach-Object { "Done: $($_.FullName)  ($([math]::Round($_.Length/1MB,1)) MB)" }
+# Logitech recommends pluginName_version.lplug4, e.g. DeepWorkAi_4_0.lplug4
+$ver = (Get-Content deepworkai/plugin/package.json -Raw | ConvertFrom-Json).version.Split(".")
+$out = "deepworkai/plugin/DeepWorkAi_$($ver[0])_$($ver[1]).lplug4"
+Move-Item deepworkai/plugin/DeepWorkAi.lplug4 $out -Force
+Get-Item $out | ForEach-Object { "Done: $($_.FullName)  ($([math]::Round($_.Length/1MB,1)) MB)" }

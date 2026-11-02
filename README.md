@@ -1,5 +1,7 @@
 # Deep Work AI
 
+**Version 4.0.0 (Beta). Windows 10 and Windows 11 only.**
+
 Deep Work AI is a plugin for the Logitech MX Creative Console. It helps you keep your focus.
 Three keys and one dial control all functions. All data stays on your computer.
 
