@@ -12,6 +12,11 @@ import time
 from pathlib import Path
 
 exe = Path(sys.argv[1]).resolve()
+try:                                   # a copy already running would answer instead of ours
+    socket.create_connection(("127.0.0.1", 57321), timeout=0.5).close()
+    raise SystemExit("FAIL: port 57321 is in use - quit the running Deep Work AI first")
+except OSError:
+    pass
 home = Path(tempfile.mkdtemp(prefix="dwai-smoke-"))
 env = dict(os.environ, DEEPWORKAI_HOME=str(home), DEEPWORKAI_OFFLINE="1", QT_QPA_PLATFORM="offscreen")
 proc = subprocess.Popen([str(exe)], env=env, cwd=str(exe.parent))
