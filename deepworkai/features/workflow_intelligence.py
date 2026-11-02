@@ -237,10 +237,25 @@ def infer_state(events: list[dict], now: datetime | None = None,
 
 # ── Intelligence DB (local) ──────────────────────────────────────────────────
 _schema_ready: set = set()
+_db_lock = threading.RLock()
+
+
+class _LockedConn(sqlite3.Connection):
+    # One writer per process: on Windows, 300 threads fighting over SQLite's file lock
+    # outlast the busy timeout and inserts were silently dropped.
+    def __enter__(self):
+        _db_lock.acquire()
+        return super().__enter__()
+
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            _db_lock.release()
 
 
 def _conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(INTEL_DB, timeout=10)
+    conn = sqlite3.connect(INTEL_DB, timeout=10, factory=_LockedConn)
     key = str(INTEL_DB)
     if key not in _schema_ready:              # create tables once per process, not per call
         conn.execute("PRAGMA journal_mode=WAL")   # readers never block the writer
