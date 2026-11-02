@@ -1,0 +1,17 @@
+# Posts a comment that mentions the PR author, so the Deep Work AI Inbox receives a real notification.
+name: Inbox test
+on:
+  pull_request:
+    types: [opened, reopened]
+permissions:
+  pull-requests: write
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh pr comment "$PR" --repo "$REPO" --body "@${AUTHOR} Inbox test - this mention should appear in your Deep Work AI Inbox."
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
