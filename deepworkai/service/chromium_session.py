@@ -119,6 +119,23 @@ def parse_session(data: bytes) -> list[str]:
     return [u for *_, u in open_tabs if not (u in seen or seen.add(u))]
 
 
+_SECRET_PARAM = __import__("re").compile(
+    r"(?i)^(.*token.*|code|state|key|apikey|api_key|sig|signature|password|pass|pwd|secret|auth.*|"
+    r"session.*|sid|jwt|otp|nonce|ticket|credential.*|x-amz-.*|access.*)$")
+
+
+def strip_secret_params(url: str) -> str:
+    """Drop query parameters that look like secrets (reset tokens, OAuth codes, sessions)
+    and the #fragment (OAuth implicit-flow tokens live there) before a URL is stored."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    try:
+        u = urlsplit(url)
+        q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True) if not _SECRET_PARAM.match(k)]
+        return urlunsplit((u.scheme, u.netloc, u.path, urlencode(q), ""))
+    except ValueError:
+        return url.split("?")[0]
+
+
 def current_session_file(profile_dir: Path) -> Path | None:
     """Newest live-session file (never the Tabs_* recently-closed list)."""
     sessions = profile_dir / "Sessions"
