@@ -165,6 +165,10 @@ This script:
 
 ## Configuration (.env)
 
+> **Plugin users:** you don't need this file. Open the Hub, go to **Inbox → Accounts**, paste your
+> GitHub, Slack or Jira token and press **Connect**. Tokens are encrypted for your Windows account (DPAPI)
+> immediately and never shown again; **Remove** deletes them.
+
 Create a `.env` file in the project root. All fields are optional — the system will run without any of them, with affected features silently degraded.
 
 ```env

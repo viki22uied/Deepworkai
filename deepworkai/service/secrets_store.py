@@ -28,6 +28,7 @@ VAULT = DATA_DIR / "secrets.bin"
 SECRET_KEYS = ("SLACK_TOKEN", "GITHUB_TOKEN", "JIRA_TOKEN")          # moved into the vault
 _ENTROPY = b"DeepWorkAI.v1"
 _cache: dict | None = None
+_cache_mtime = 0.0
 
 
 # ── DPAPI (Windows) ───────────────────────────────────────────────────────────
@@ -70,10 +71,15 @@ def _restrict(path: Path):
 
 # ── Vault ─────────────────────────────────────────────────────────────────────
 def _load() -> dict:
-    global _cache
-    if _cache is not None:
+    # Reload when the file changes: the Hub saves tokens, the service reads them.
+    global _cache, _cache_mtime
+    try:
+        m = VAULT.stat().st_mtime
+    except OSError:
+        m = 0.0
+    if _cache is not None and m == _cache_mtime:
         return _cache
-    _cache = {}
+    _cache, _cache_mtime = {}, m
     if available() and VAULT.exists():
         try:
             _cache = json.loads(_dpapi(VAULT.read_bytes(), protect=False).decode())

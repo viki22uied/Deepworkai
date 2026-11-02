@@ -897,6 +897,108 @@ FocusPage._save_note = _focus_save_note
 FocusPage.busy = _focus_busy
 
 
+# Accounts the Inbox can read from. Fields marked secret go into the DPAPI vault.
+SERVICES = [
+    ("GitHub", "Review requests, mentions and CI results",
+     "github.com > Settings > Developer settings > Tokens (classic): tick notifications (and repo for private repos)",
+     [("GITHUB_TOKEN", "Personal access token", True)]),
+    ("Slack", "Direct messages and mentions",
+     "api.slack.com/apps > your app > OAuth & Permissions > User OAuth Token (xoxp-...)",
+     [("SLACK_TOKEN", "User OAuth token", True)]),
+    ("Jira", "Issues assigned to you",
+     "id.atlassian.com > Security > API tokens",
+     [("JIRA_URL", "Site, e.g. https://you.atlassian.net", False),
+      ("JIRA_EMAIL", "Account email", False),
+      ("JIRA_TOKEN", "API token", True)]),
+]
+
+
+class ConnectPanel(QFrame):
+    """Connect GitHub/Slack/Jira from the Inbox. Tokens are encrypted for this Windows user
+    (DPAPI) the moment you press Connect, the field is wiped, and they are never shown again."""
+
+    def __init__(self, on_change=None):
+        super().__init__()
+        self.on_change = on_change
+        self.setObjectName("card")
+        self.lay = QVBoxLayout(self); self.lay.setContentsMargins(22, 18, 22, 18); self.lay.setSpacing(10)
+        self.render()
+
+    @staticmethod
+    def connected(keys) -> bool:
+        from deepworkai.service.secrets_store import get
+        return all(get(k) for k, _, _ in keys)
+
+    def render(self):
+        clear(self.lay)
+        self.lay.addWidget(overline("Connect your accounts"))
+        self.lay.addWidget(label("Tokens are encrypted on this PC for your Windows account only, and are "
+                                 "only ever sent to the service they belong to.", 12.5, color=T["text3"], wrap=True))
+        for name, what, how, keys in SERVICES:
+            row = QHBoxLayout(); row.setSpacing(10)
+            col = QVBoxLayout(); col.setSpacing(2)
+            col.addWidget(label(name, 15, QFont.Weight.DemiBold))
+            col.addWidget(label(what, 12.5, color=T["text2"]))
+            row.addLayout(col, 1)
+            if self.connected(keys):
+                row.addWidget(label("Connected", 13, QFont.Weight.DemiBold, SYS["green"]))
+                rm = QPushButton("Remove"); rm.setObjectName("quiet"); rm.setFont(font(13, QFont.Weight.DemiBold))
+                rm.setCursor(Qt.CursorShape.PointingHandCursor)
+                rm.clicked.connect(lambda _, k=keys: self.remove(k)); row.addWidget(rm)
+                self.lay.addLayout(row)
+                continue
+            self.lay.addLayout(row)
+            fields = []
+            for key, hint, secret in keys:
+                e = QLineEdit(); e.setPlaceholderText(hint); e.setFont(font(13))
+                if secret:
+                    e.setEchoMode(QLineEdit.EchoMode.Password)      # masked; Qt also blocks copy/cut
+                e.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+                e.setStyleSheet(f"QLineEdit {{ background: {T['window']}; color: {T['text']}; "
+                                f"border: 1px solid {T['text3']}; border-radius: 9px; padding: 7px 10px; }}")
+                fields.append((key, e, secret)); self.lay.addWidget(e)
+            bot = QHBoxLayout()
+            bot.addWidget(label(how, 11.5, color=T["text3"], wrap=True), 1)
+            go = QPushButton("Connect"); go.setObjectName("pill"); go.setFont(font(12.5, QFont.Weight.DemiBold))
+            go.setCursor(Qt.CursorShape.PointingHandCursor)
+            msg = label("", 12, color=SYS["red"])
+            go.clicked.connect(lambda _, f=fields, m=msg: self.save(f, m))
+            fields[-1][1].returnPressed.connect(go.click)
+            bot.addWidget(go)
+            self.lay.addLayout(bot); self.lay.addWidget(msg)
+
+    def save(self, fields, msg: QLabel):
+        values = {k: e.text().strip() for k, e, _ in fields}
+        for k, v in values.items():
+            if not v:
+                msg.setText("Fill in every field."); return
+            if any(c.isspace() for c in v) or len(v) > 512:
+                msg.setText("That doesn't look right: no spaces, and paste only the token."); return
+            if k == "JIRA_URL" and not v.startswith("https://"):
+                msg.setText("The Jira site must start with https://"); return
+        try:
+            from deepworkai.service.secrets_store import set_secret
+            for k, v in values.items():
+                set_secret(k, v)
+        except Exception as ex:                       # never echo the value
+            msg.setText(f"Couldn't save: {ex.__class__.__name__}"); return
+        finally:
+            for _, e, _ in fields:
+                e.clear()
+            values.clear()
+        self.render()
+        if self.on_change:
+            self.on_change()
+
+    def remove(self, keys):
+        from deepworkai.service.secrets_store import delete
+        for k, _, _ in keys:
+            delete(k)
+        self.render()
+        if self.on_change:
+            self.on_change()
+
+
 class InboxPage(QWidget):
     def __init__(self, data: Data, flt: str = "ALL"):
         super().__init__()
@@ -914,12 +1016,20 @@ class InboxPage(QWidget):
             b.clicked.connect(lambda _, k=key: self.set_filter(k))
             self.segs[key] = b; sl.addWidget(b)
         bar.addWidget(seg); bar.addStretch()
+        acc = QPushButton("Accounts"); acc.setObjectName("quiet")
+        acc.setFont(font(13, QFont.Weight.Medium)); acc.setCursor(Qt.CursorShape.PointingHandCursor)
+        acc.clicked.connect(lambda: self.connect.setVisible(not self.connect.isVisible())); bar.addWidget(acc)
         clr = QPushButton("Clear all"); clr.setObjectName("quiet")
         clr.setFont(font(13, QFont.Weight.Medium)); clr.setCursor(Qt.CursorShape.PointingHandCursor)
         clr.clicked.connect(self.clear_all); bar.addWidget(clr)
         root.addLayout(bar)
+        self.connect = ConnectPanel(on_change=self.refresh)
+        # Open by default until something is connected — the Inbox is empty without it.
+        self.connect.setVisible(not any(ConnectPanel.connected(k) for *_, k in SERVICES))
         inner = QWidget()
-        self.list = QVBoxLayout(inner); self.list.setContentsMargins(0, 0, 6, 8); self.list.setSpacing(10)
+        col = QVBoxLayout(inner); col.setContentsMargins(0, 0, 6, 8); col.setSpacing(10)
+        col.addWidget(self.connect)
+        self.list = QVBoxLayout(); self.list.setSpacing(10); col.addLayout(self.list, 1)
         root.addWidget(scroll(inner), 1)
         self.refresh()
 

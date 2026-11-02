@@ -168,3 +168,26 @@ def test_restore_logs_no_window_titles(monkeypatch, caplog):
         core.restore_workspace({"windows": [{"process": "code.exe", "title": "secret-salary.xlsx - Code"}],
                                 "browsers": {}, "tabs_format": core.TABS_FORMAT})
     assert "secret-salary" not in caplog.text
+
+
+def test_connect_panel_encrypts_and_wipes_token(qapp, tmp_path, monkeypatch, caplog):
+    import logging
+    from PyQt6.QtWidgets import QLineEdit
+    from deepworkai.service import secrets_store as ss
+    from deepworkai.ui import hub
+    monkeypatch.setattr(ss, "VAULT", tmp_path / "secrets.bin")
+    monkeypatch.setattr(ss, "_cache", None)
+    for k in ("GITHUB_TOKEN", "SLACK_TOKEN", "JIRA_TOKEN", "JIRA_URL", "JIRA_EMAIL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(ss, "_env_file", lambda: {})
+    p = hub.ConnectPanel()
+    field = p.findChildren(QLineEdit)[0]                       # GitHub token
+    assert field.echoMode() == QLineEdit.EchoMode.Password
+    token = "ghp_" + "A1b2C3d4" * 4
+    field.setText(token)
+    with caplog.at_level(logging.DEBUG):
+        field.returnPressed.emit()
+    assert ss.get("GITHUB_TOKEN") == token                     # usable by the service
+    assert token.encode() not in (tmp_path / "secrets.bin").read_bytes()   # encrypted at rest
+    assert token not in caplog.text
+    assert all(token not in e.text() for e in p.findChildren(QLineEdit))   # wiped from the UI
