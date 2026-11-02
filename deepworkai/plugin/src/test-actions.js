@@ -7,12 +7,14 @@
  *
  *   FOCUS   1× Focus Shield on/off (auto-saves workspace first)
  *           2× Meeting mode on/off
- *   RESUME  1× Restore workspace + show "where was I"
+ *           3× Save my spot (workspace snapshot + exact file:line anchor)
+ *   RESUME  1× Restore workspace, jump to anchored line, show "where was I"
  *           2× Write a next-step note
  *   INBOX   1× Open the Hub (Inbox if items are waiting, otherwise Focus)
  *           2× Queue this interruption for later
  *           3× Release everything that was held
- *   DIAL    rotate = travel back in time (see adjustment-actions.js)
+ *   DIAL    rotate = travel back in time; during a debug session it steps
+ *           the debugger instead (see adjustment-actions.js)
  *
  * Capture has no key: the local AI saves context automatically.
  */
@@ -59,9 +61,10 @@ class MultiPressAction extends CommandAction {
 export class FocusKey extends MultiPressAction {
   name        = 'dw_focus';
   displayName = 'Focus';
-  description = '1× Focus Shield on/off · 2× Meeting mode';
+  description = '1× Focus Shield · 2× Meeting mode · 3× Save my spot';
   groupName   = 'Deep Work AI';
-  commands    = { 1: ['shield', 'SHIELD_TOGGLE'], 2: ['meeting', 'MEETING_TOGGLE'] };
+  commands    = { 1: ['shield', 'SHIELD_TOGGLE'], 2: ['meeting', 'MEETING_TOGGLE'],
+                  3: ['save-spot', 'SAVE_SPOT'] };
 }
 
 export class ResumeKey extends MultiPressAction {
