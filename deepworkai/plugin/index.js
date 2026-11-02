@@ -24,7 +24,7 @@ import {
 } from './src/test-actions.js';
 
 import { TimeTravelAction } from './src/adjustment-actions.js';
-import { log, ensureService } from './src/tcp-client.js';
+import { log, ensureService, getProjectRoot } from './src/tcp-client.js';
 
 const pluginSDK = new PluginSDK();
 
@@ -50,6 +50,7 @@ log(`[PLUGIN] Deep Work AI v3.2.0 — ${ACTIONS.length} actions (8 buttons + dia
 await pluginSDK.connect();
 
 log('[PLUGIN] Connected to Logitech Options+ — all systems ready');
+log(`[PLUGIN] Project root: ${getProjectRoot() ?? 'NOT FOUND — set project_root in config.json'}`);
 
 // ── Auto-start Python backend ──────────────────────────────────────────────────
 ensureService().then(ok => {
@@ -59,39 +60,9 @@ ensureService().then(ok => {
   );
 });
 
-// ── LCD Polling (5-second refresh) ─────────────────────────────────────────────
-// Uses esbuild-injected require() — do NOT import createRequire (already declared by esmShimPlugin)
-const _fs   = require('fs');
-const _path = require('path');
-
-const LCD_STATE_PATH = _path.resolve(
-  _path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')),
-  '..', '..', 'data', 'lcd_state.json'
-);
-
-function getLcdLabels(state) {
-  const mode = state.mode || 'ready';
-  if (mode === 'meeting') {
-    const mins = state.focus_mins || 0;
-    return [`📅 ${mins}m`, 'End Mtg', '', '', '', '', '', '', ''];
-  }
-  const ci    = state.ci === 'pass' ? '✅ CI' : state.ci === 'fail' ? '❌ CI' : 'CI...';
-  const prs   = state.prs > 0 ? `PRs:${state.prs}` : 'No PRs';
-  const timer = state.focus_mins > 0 ? `⏱${state.focus_mins}m` : 'Focus';
-  const queue = state.queue > 0 ? `Q:${state.queue}` : 'Queue';
-  return [ci, prs, timer, queue, '', '', '', '', ''];
-}
-
-function updateLcd() {
-  try {
-    if (!_fs.existsSync(LCD_STATE_PATH)) return;
-    const state  = JSON.parse(_fs.readFileSync(LCD_STATE_PATH, 'utf8'));
-    const labels = getLcdLabels(state);
-    if (pluginSDK.setButtonLabel) {
-      labels.forEach((lbl, i) => { if (lbl) pluginSDK.setButtonLabel(i, lbl); });
-    }
-  } catch (_) {}
-}
-
-setInterval(updateLcd, 5000);
-updateLcd();
+// ── LCD labels ────────────────────────────────────────────────────────────────
+// The previous LCD polling called pluginSDK.setButtonLabel(), which does not exist
+// in @logitech/plugin-sdk 0.1.1 (it only offers registerAction/connect), and it
+// read data/ from the wrong folder. It was a silent no-op, so it has been removed.
+// The service still writes <repo>/data/lcd_state.json for when the SDK gains
+// a label/image API.
