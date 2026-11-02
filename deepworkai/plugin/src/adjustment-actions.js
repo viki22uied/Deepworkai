@@ -61,14 +61,15 @@ export class TimeTravelAction extends AdjustmentAction {
   displayName = 'Time Travel';
   description = 'Rotate ← further back · → closer · Stop = auto-restore';
   groupName   = 'Deep Work AI';
+  hasReset    = false;   // required by AdjustmentAction (abstract in the SDK)
 
   /**
    * Called by SDK on every encoder tick.
    * tick > 0 = clockwise (forward in time = fewer minutes)
    * tick < 0 = counter-clockwise (further back = more minutes)
    */
-  async execute(event) {
-    const tick = event?.tick ?? 0;
+  execute(event) {
+    const tick = Number.isFinite(event?.tick) ? event.tick : 0;
 
     if (tick === 0) {
       // Some SDK versions call execute(tick=0) for press — treat same as pause
@@ -79,7 +80,7 @@ export class TimeTravelAction extends AdjustmentAction {
     // Each tick = ±5 minutes
     // Counter-clockwise (tick < 0) = go further BACK = increase minutes
     // Clockwise        (tick > 0) = come FORWARD    = decrease minutes
-    const delta = -Math.sign(tick) * 5;
+    const delta = -tick * 5;   // honour multi-click ticks from fast rotation
     _rewindMinutes = Math.max(MIN_MINUTES, Math.min(MAX_MINUTES, _rewindMinutes + delta));
 
     log(`[DIAL] Selected: ${_rewindMinutes}m ago (tick=${tick})`);
