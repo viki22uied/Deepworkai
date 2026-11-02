@@ -773,9 +773,12 @@ def _lock_data_dir():
         if os.name == "nt":
             user = os.environ.get("USERNAME", "")
             if user:
-                subprocess.run(["icacls", str(DATA_DIR), "/inheritance:r", "/grant:r",
-                                f"{user}:(OI)(CI)F", "/T", "/Q"],
-                               capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
+                # Lock the folder, then make its contents inherit that ACL. (With /T, files lost
+                # their inherited entries but rejected the (OI)(CI) grant, leaving them unreadable.)
+                for args in ([str(DATA_DIR), "/inheritance:r", "/grant:r", f"{user}:(OI)(CI)F", "/Q"],
+                             [str(DATA_DIR / "*"), "/reset", "/T", "/Q"]):
+                    subprocess.run(["icacls", *args], capture_output=True,
+                                   creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
     except Exception as e:
         log.warning("[SECURITY] could not restrict data folder: %s", e)
     try:
@@ -843,6 +846,11 @@ def _handle_client(conn: socket.socket):
             log.warning("[AUTH] rejected unauthenticated command")
             response = "ERROR AUTH"
         conn.sendall((response + "\n").encode("utf-8"))
+        # Closing with unread input makes Windows send RST, which discards the reply.
+        conn.shutdown(socket.SHUT_WR)
+        conn.settimeout(0.2)
+        while conn.recv(4096):
+            pass
     except socket.timeout:
         pass
     except Exception as e:
