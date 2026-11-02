@@ -596,7 +596,7 @@ def _travel_restore(cid: str) -> str:
     snap, ts, summary = core.load_snapshot_by_id(cid)
     if not snap:
         return f"ERROR TRAVEL no snapshot {cid[:8]}"
-    threading.Thread(target=core.restore_workspace, args=(snap, ts),
+    threading.Thread(target=core.restore_workspace, args=(snap, ts), kwargs={"travel": True},
                      daemon=True, name="TravelRestore").start()
     return f"OK TRAVEL restored {ts} {summary}"
 

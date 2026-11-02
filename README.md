@@ -71,7 +71,7 @@ Three keys and one dial control all functions. Push a key one, two or three time
 |---|---|
 | Turn left | Go back through the moments of your day |
 | Turn right | Go forward to "Now" |
-| Push the dial | Restore the selected moment |
+| Push the dial | Restore the selected moment. Windows that were not open at that moment are minimized. |
 | Stop turning | Nothing occurs. After 30 seconds, the Hub closes. |
 
 You can also push **Resume** 1 time to restore the selected moment.
@@ -164,6 +164,9 @@ When the plugin restores a workspace:
 
 Brave locks its tab file while it runs. The plugin then reads the tab list at restore time,
 up to the moment of the save. The plugin cannot close tabs in a browser.
+
+A Time Travel restore also minimizes the windows that were not open at that moment.
+It does not close them. Use the taskbar to show them again. **Resume** does not minimize windows.
 
 The plugin never starts a second copy of itself. It does not restart Logitech or system processes.
 

@@ -989,7 +989,7 @@ def reposition(hwnd: int, pos: dict, show_cmd: int = 1):
 
 
 # ── Main Restore ──────────────────────────────────────────────────────────────
-def restore_workspace(snapshot: dict, label: str = ""):
+def restore_workspace(snapshot: dict, label: str = "", travel: bool = False):
     """
     Fast workspace restore.
     Target: complete in < 8 seconds.
@@ -1128,7 +1128,26 @@ def restore_workspace(snapshot: dict, label: str = ""):
             if pname in newly_launched and user32.IsWindow(hwnd):
                 reposition(hwnd, win.get("pos", {}), win.get("show_cmd", 1))
 
+    if travel:
+        _minimize_others({h for _, h, _ in placed})
+
     log.info("[RESTORE] Complete. %d/%d windows repositioned.", repositioned, len(windows))
+
+
+def _minimize_others(keep: set):
+    """Time Travel: make the screen look like that moment. Windows that weren't open then are
+    minimized — never closed, so nothing is lost and the taskbar brings them back."""
+    SW_MINIMIZE = 6
+    n = 0
+    for pname, wins in _snapshot_hwnds().items():
+        for w in wins:
+            if w["hwnd"] in keep or w["title"] == "program manager":     # the desktop itself
+                continue
+            if user32.IsIconic(w["hwnd"]):
+                continue
+            user32.ShowWindow(w["hwnd"], SW_MINIMIZE)
+            n += 1
+    log.info("[RESTORE] Time Travel: minimized %d window(s) that were not open then", n)
 
 
 # ── Auto-Capture (Disabled) ───────────────────────────────────────────────────

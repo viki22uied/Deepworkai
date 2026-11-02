@@ -220,3 +220,32 @@ def test_tests_cannot_touch_the_pc():
     import pyautogui
     with pytest.raises(AssertionError):
         pyautogui.press("f5")
+
+
+def test_time_travel_minimizes_but_never_closes(monkeypatch):
+    """Going back to a moment hides windows that weren't open then; it never closes them."""
+    import importlib.util
+    from conftest import ROOT
+    spec = importlib.util.spec_from_file_location("drc_tt", ROOT / "deepworkai" / "service" / "deep_restore_core.py")
+    core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+    calls = []
+
+    class U32:
+        def IsIconic(self, h): return False
+        def ShowWindow(self, h, cmd): calls.append((h, cmd))
+        def PostMessageW(self, *a): raise AssertionError("closed a window")
+        def IsWindow(self, h): return True
+    monkeypatch.setattr(core, "user32", U32())
+    monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {
+        "code.exe": [{"hwnd": 1, "title": "app.py"}], "claude.exe": [{"hwnd": 2, "title": "claude"}],
+        "explorer.exe": [{"hwnd": 3, "title": "program manager"}]})
+    monkeypatch.setattr(core, "enum_windows", lambda: [])
+    monkeypatch.setattr(core, "reposition", lambda *a: None)
+    monkeypatch.setattr(core, "launch_app", lambda *a: False)
+    core.restore_workspace({"windows": [{"process": "code.exe", "title": "app.py"}], "browsers": {},
+                            "tabs_format": core.TABS_FORMAT}, travel=True)
+    assert calls == [(2, 6)]          # only Claude (not open then) is minimized; desktop untouched
+    calls.clear()
+    core.restore_workspace({"windows": [{"process": "code.exe", "title": "app.py"}], "browsers": {},
+                            "tabs_format": core.TABS_FORMAT})
+    assert calls == []                # Resume never hides anything

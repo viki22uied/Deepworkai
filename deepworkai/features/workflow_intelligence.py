@@ -258,30 +258,36 @@ class _LockedConn(sqlite3.Connection):
 def _conn() -> sqlite3.Connection:
     conn = sqlite3.connect(INTEL_DB, timeout=10, factory=_LockedConn)
     key = str(INTEL_DB)
-    if key not in _schema_ready:              # create tables once per process, not per call
-        conn.execute("PRAGMA journal_mode=WAL")   # readers never block the writer
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS state_log (
-                ts TEXT NOT NULL, activity TEXT, focus_score INTEGER, deep INTEGER
-            );
-            CREATE TABLE IF NOT EXISTS auto_context (
-                ts TEXT NOT NULL, reason TEXT, activity TEXT, repo TEXT, branch TEXT,
-                anchor TEXT, summary TEXT
-            );
-            CREATE TABLE IF NOT EXISTS decisions (
-                ts TEXT NOT NULL, notif_id TEXT, source TEXT, sender TEXT, priority TEXT,
-                decision TEXT, focus_score INTEGER, released INTEGER DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS sender_weight (
-                sender TEXT PRIMARY KEY, opened INTEGER DEFAULT 0, ignored INTEGER DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_state_ts ON state_log(ts);
-            CREATE INDEX IF NOT EXISTS idx_dec_rel ON decisions(released, decision);
-            CREATE INDEX IF NOT EXISTS idx_dec_ts ON decisions(ts);
-            CREATE INDEX IF NOT EXISTS idx_ctx_ts ON auto_context(ts);
-        """)
-        _schema_ready.add(key)
+    with _db_lock:                            # creating tables is a write too: one thread at a time
+        if key not in _schema_ready:
+            _init_schema(conn, key)
     return conn
+
+
+def _init_schema(conn, key: str):
+    """Create tables once per process, not per call (caller holds _db_lock)."""
+    conn.execute("PRAGMA journal_mode=WAL")   # readers never block the writer
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS state_log (
+            ts TEXT NOT NULL, activity TEXT, focus_score INTEGER, deep INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS auto_context (
+            ts TEXT NOT NULL, reason TEXT, activity TEXT, repo TEXT, branch TEXT,
+            anchor TEXT, summary TEXT
+        );
+        CREATE TABLE IF NOT EXISTS decisions (
+            ts TEXT NOT NULL, notif_id TEXT, source TEXT, sender TEXT, priority TEXT,
+            decision TEXT, focus_score INTEGER, released INTEGER DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS sender_weight (
+            sender TEXT PRIMARY KEY, opened INTEGER DEFAULT 0, ignored INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_state_ts ON state_log(ts);
+        CREATE INDEX IF NOT EXISTS idx_dec_rel ON decisions(released, decision);
+        CREATE INDEX IF NOT EXISTS idx_dec_ts ON decisions(ts);
+        CREATE INDEX IF NOT EXISTS idx_ctx_ts ON auto_context(ts);
+    """)
+    _schema_ready.add(key)
 
 
 def purge_old(days: int = RETENTION_DAYS):

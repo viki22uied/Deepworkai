@@ -62,7 +62,7 @@ class FakeCore(types.ModuleType):
     def load_snapshot_by_id(self, cid): return ({"x": 1}, cid, "summary") if cid.startswith("id") else (None, "", "")
     def load_latest_snapshot(self): return ({"x": 1}, "latest", "summary")
     def load_snapshot_before(self, m): return ({"x": 1}, f"before{m}", "summary")
-    def restore_workspace(self, snap, ts): self.restored.append(ts)
+    def restore_workspace(self, snap, ts, travel=False): self.restored.append(ts)
     def capture_workspace(self): return {"windows": [], "browsers": {}}
     def save_snapshot(self, snap, name, context=None):
         self.captured += 1
