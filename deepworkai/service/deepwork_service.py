@@ -259,10 +259,10 @@ def _handle_shield_toggle() -> str:
     return _handle_shield_off() if _shield_state.get("active") else _handle_shield_on()
 
 
-def _handle_triage_show() -> str:
+def _handle_triage_show(tab: str = "inbox") -> str:
     global _triage_proc
     if _triage_proc and _triage_proc.poll() is None:
-        return "OK TRIAGE_SHOW already_running"
+        _triage_proc.terminate()          # reopen on the requested tab
     script = PROJECT_ROOT / "deepworkai" / "features" / "triage_dashboard.py"
     if not script.exists():
         return f"ERROR TRIAGE_SHOW missing {script}"
@@ -270,7 +270,7 @@ def _handle_triage_show() -> str:
         pythonw = Path(sys.executable).parent / "pythonw.exe"
         interp  = str(pythonw) if pythonw.exists() else sys.executable
         _triage_proc = subprocess.Popen(
-            [interp, str(script)],
+            [interp, str(script), "--tab", tab],
             cwd=str(PROJECT_ROOT),
             creationflags=subprocess.CREATE_NO_WINDOW,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -363,6 +363,7 @@ def _handle_cognitive_rewind() -> str:
     try:
         from deepworkai.features.cognitive_rewind import build_rewind_context
         ctx = build_rewind_context(minutes=15)
+        _handle_triage_show("focus")      # show it on screen, not just to the plugin
         return "OK COGNITIVE_REWIND " + json.dumps(ctx)
     except Exception as e:
         return f"ERROR COGNITIVE_REWIND {e}"
