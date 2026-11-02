@@ -63,7 +63,7 @@ def build_rewind_context(minutes: int = 15) -> dict:
         c = conn.execute(
             "SELECT details FROM events WHERE event_type='git_context' "
             "AND timestamp >= ? ORDER BY timestamp DESC LIMIT 1",
-            (cutoff,),
+            ((datetime.now() - timedelta(hours=12)).isoformat(),),   # latest, even if older than the window
         )
         row = c.fetchone()
         if row:
@@ -80,11 +80,9 @@ def build_rewind_context(minutes: int = 15) -> dict:
         if row:
             details = json.loads(row[1]) if row[1] else {}
             title = details.get("title", "")
-            # VS Code titles look like "filename.py — project — VS Code"
-            if "—" in title:
-                context["last_ide_file"] = title.split("—")[0].strip()
-            elif title:
-                context["last_ide_file"] = title
+            # "● app.py - my-repo - Visual Studio Code" → app.py
+            from deepworkai.service.ide_context import parse_title
+            context["last_ide_file"] = parse_title(title)[0] or None
 
         # Developer-relevant browser tabs
         c = conn.execute(

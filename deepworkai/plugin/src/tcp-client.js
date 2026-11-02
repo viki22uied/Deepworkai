@@ -170,15 +170,34 @@ function spawnService() {
   });
 }
 
+let _lastOk = 0;
+const ALIVE_TTL = 15000;
+
 export async function ensureService() {
+  if (Date.now() - _lastOk < ALIVE_TTL) return true;   // skip a round trip on rapid presses
   const alive = await isServiceAlive();
+  if (alive) _lastOk = Date.now();
   if (alive) return true;
   log('[SERVICE] Not running — spawning...');
   return spawnService();
 }
 
+// ── Session key ──────────────────────────────────────────────────────────────
+// The service writes a fresh random key to <repo>/data/.session_key on start;
+// every command except PING must be prefixed with "@<key> ".
+function readSessionKey() {
+  const root = getProjectRoot();
+  if (!root) return '';
+  try {
+    return fs.readFileSync(path.join(root, 'data', '.session_key'), 'utf-8').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 // ── Send Command (with retry) ────────────────────────────────────────────────
 function sendCommandOnce(command) {
+  const wire = command === 'PING' ? command : `@${readSessionKey()} ${command}`;
   return new Promise((resolve, reject) => {
     const client = new net.Socket();
     let output = '';
@@ -194,7 +213,7 @@ function sendCommandOnce(command) {
 
     let sent = false;
     client.setTimeout(COMMAND_TIMEOUT);
-    client.connect(PORT, HOST, () => { sent = true; client.write(command + '\n'); });
+    client.connect(PORT, HOST, () => { sent = true; client.write(wire + '\n'); });
     client.on('data', (data) => {
       output += data.toString();
       if (output.includes('\n')) settle(null, output.trim());
@@ -209,6 +228,10 @@ export async function sendCommand(command) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const result = await sendCommandOnce(command);
+      _lastOk = Date.now();
+      if (result.startsWith('ERROR AUTH')) {
+        log('[CMD] Rejected: session key missing or stale — is project_root correct in config.json?');
+      }
       log(`[CMD] ${command} → ${result}`);
       return result;
     } catch (e) {

@@ -28,13 +28,10 @@ from typing import Optional
 log = logging.getLogger("slack_integration")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BASE_DIR    = Path(__file__).parent.parent
-# Fix: Data dir is usually at root but service script parent parent is also root
-# Let's ensure BASE_DIR is actually the project root d:\Deepworkai-main
-if BASE_DIR.name == "service":
-    BASE_DIR = BASE_DIR.parent.parent
-
-DATA_DIR    = BASE_DIR / "data"
+# One data folder for the whole app (<repo>/data) — the UI reads snapshots from here.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH     = DATA_DIR / "capsules.db"
 
 SLACK_API   = "https://slack.com/api"
@@ -275,6 +272,9 @@ def open_channel(workspace_id: str = "", channel_id: str = "") -> bool:
 
 def _open_slack_url(url: str) -> bool:
     """Open a slack:// URL via Windows ShellExecute."""
+    if not str(url).startswith("slack://"):
+        log.warning("[SLACK] Refusing to open non-slack URL")
+        return False
     try:
         subprocess.Popen(
             ["explorer.exe", url],

@@ -20,6 +20,7 @@ import argparse
 import json
 import sqlite3
 import sys
+import time
 import webbrowser
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -32,7 +33,8 @@ DATA = ROOT / "data"
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPoint, QPointF
 from PyQt6.QtGui import (QBrush, QColor, QConicalGradient, QFont, QGuiApplication,
                          QLinearGradient, QPainter, QPainterPath, QPen)
-from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QPushButton,
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
                              QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 # ── Data (local SQLite only) ──────────────────────────────────────────────────
@@ -388,6 +390,7 @@ class Icon(QWidget):
 def label(text: str, px: float = 13, weight=QFont.Weight.Normal, color: str | None = None,
           display: bool = False, wrap: bool = False, caps: bool = False) -> QLabel:
     l = QLabel(text.upper() if caps else text)
+    l.setTextFormat(Qt.TextFormat.PlainText)       # never render notification text as HTML
     f = font(px, weight, display)
     if caps:
         f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
@@ -413,6 +416,7 @@ def caption(icon: str, text: str, color: str) -> QHBoxLayout:
 
 def capsule(text: str, color: str) -> QLabel:
     l = QLabel(text)
+    l.setTextFormat(Qt.TextFormat.PlainText)
     l.setFont(font(11, QFont.Weight.DemiBold))
     c = QColor(color)
     l.setStyleSheet(f"color: {color}; background: rgba({c.red()},{c.green()},{c.blue()},0.14);"
@@ -520,6 +524,15 @@ class HourBars(QWidget):
                        f"{hr}{'a' if k < 12 else 'p'}")
 
 
+def open_url(url: str):
+    """Only real web links. A notification could carry file:// or a local .exe path,
+    which webbrowser.open would hand to the OS to execute."""
+    from urllib.parse import urlparse
+    u = urlparse(url or "")
+    if u.scheme in ("http", "https") and u.netloc:
+        webbrowser.open(url)
+
+
 def scroll(inner: QWidget) -> QScrollArea:
     s = QScrollArea(); s.setWidgetResizable(True); s.setWidget(inner)
     s.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -604,10 +617,16 @@ class FocusPage(Page):
         wl.addStretch()
         n, nl = card()
         nl.addLayout(caption("pencil", "Next step", SYS["orange"]))
-        nl.addWidget(label(d["next_step"] or "Press Journal on your keypad to leave yourself a note.",
-                           15 if d["next_step"] else 13,
-                           QFont.Weight.DemiBold if d["next_step"] else QFont.Weight.Normal,
-                           None if d["next_step"] else T["text2"], wrap=True))
+        self.note = NoteEdit(d["next_step"], self._save_note)
+        self.note.setPlaceholderText("What's your next step?  Enter to save")
+        self.note.setFont(font(15, QFont.Weight.DemiBold))
+        self.note.setFixedHeight(72)
+        self.note.setStyleSheet(
+            f"QPlainTextEdit {{ background: transparent; border: none; border-bottom: 1px solid {T['line']};"
+            f"padding: 2px 0; color: {T['text']}; }}"
+            f"QPlainTextEdit:focus {{ border-bottom: 2px solid {SYS['orange']}; }}")
+        self.note_hint = label("", 11.5, color=T["text3"])
+        nl.addWidget(self.note); nl.addWidget(self.note_hint)
         nl.addStretch()
         grid.addWidget(w, 3); grid.addWidget(n, 2)
         self.lay.addLayout(grid)
@@ -638,7 +657,7 @@ class FocusPage(Page):
             ci_col = {"pass": SYS["green"], "fail": SYS["red"], "pending": SYS["orange"]}.get(ci, SYS["gray"])
             for k, v, col in (("CI", {"pass": "Passing", "fail": "Failing", "pending": "Running"}.get(ci, "Unknown"), ci_col),
                               ("Reviews", f"{rd.get('prs', 0)} waiting", SYS["blue"] if rd.get("prs") else SYS["gray"]),
-                              ("Behind main", f"{rd.get('behind', 0)} commits",
+                              ("Behind main", f"{rd.get('behind', 0)} commit{'' if rd.get('behind', 0) == 1 else 's'}",
                                SYS["orange"] if rd.get("behind", 0) > 10 else SYS["gray"])):
                 row_ = QHBoxLayout()
                 row_.addWidget(label(k, 13, color=T["text2"])); row_.addStretch()
@@ -672,6 +691,52 @@ class FocusPage(Page):
                 row_.addWidget(btn, 1)
             ql.addLayout(row_)
             self.lay.addWidget(q)
+
+
+class NoteEdit(QPlainTextEdit):
+    """Wraps long notes. Enter saves, Shift+Enter is a new line, max 300 chars."""
+    def __init__(self, text: str, on_save):
+        super().__init__(text)
+        self.on_save = on_save
+        self.document().setModified(False)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+            self.on_save(); return
+        super().keyPressEvent(e)
+        if len(self.toPlainText()) > 300:
+            self.setPlainText(self.toPlainText()[:300])
+            self.moveCursor(self.textCursor().MoveOperation.End)
+
+    def isModified(self) -> bool:
+        return self.document().isModified()
+
+    def selectAll(self):
+        super().selectAll()
+
+
+def _focus_save_note(self):
+    text = self.note.toPlainText().strip()
+    if not self.data.demo:
+        try:
+            (DATA / "next_step.txt").write_text(text, encoding="utf-8")
+        except OSError as e:
+            self.note_hint.setText(f"Couldn't save: {e}"); return
+    self.note_hint.setText("Saved ✓" if text else "Cleared")
+    self.note.document().setModified(False)
+    self.note.clearFocus()
+
+
+def _focus_busy(self) -> bool:
+    n = getattr(self, "note", None)
+    try:
+        return bool(n and (n.hasFocus() or n.isModified()))
+    except RuntimeError:                      # widget already deleted by a rebuild
+        return False
+
+
+FocusPage._save_note = _focus_save_note
+FocusPage.busy = _focus_busy
 
 
 class InboxPage(QWidget):
@@ -757,7 +822,7 @@ class InboxPage(QWidget):
             o.setStyleSheet(f"QPushButton {{ background: {SYS['blue']}; color: white; border-radius: 13px;"
                             "padding: 5px 16px; } QPushButton:hover { background: #409cff; }")
             o.setCursor(Qt.CursorShape.PointingHandCursor)
-            o.clicked.connect(lambda _, u=it["url"]: webbrowser.open(u)); bot.addWidget(o)
+            o.clicked.connect(lambda _, u=it["url"]: open_url(u)); bot.addWidget(o)
         d = QPushButton("Done"); d.setObjectName("link"); d.setFont(font(13, QFont.Weight.DemiBold))
         d.setCursor(Qt.CursorShape.PointingHandCursor)
         d.clicked.connect(lambda _, i=it["id"]: self.dismiss(i)); bot.addWidget(d)
@@ -848,11 +913,16 @@ class Meter(QWidget):
 
 # ── Window ────────────────────────────────────────────────────────────────────
 class Hub(QWidget):
-    TABS = [("focus", "Focus", "target"), ("inbox", "Inbox", "tray"), ("insights", "Insights", "chart")]
+    TABS = [("focus", "Focus", "target"), ("timeline", "Time Travel", "rewind"),
+            ("inbox", "Inbox", "tray"), ("insights", "Insights", "chart")]
     SHADOW = 18
 
-    def __init__(self, tab: str = "focus", flt: str = "", demo: bool = False):
+    def __init__(self, tab: str = "focus", flt: str = "", demo: bool = False,
+                 persistent: bool = False, demo_index: int | None = None):
         super().__init__()
+        self.persistent = persistent
+        self._by_dial = False
+        self._cmd_mtime = 0.0
         self.setWindowTitle("Deep Work AI")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -878,7 +948,10 @@ class Hub(QWidget):
         sl.addLayout(brand); sl.addSpacing(24)
 
         self.stack = QStackedWidget()
-        self.pages = {"focus": FocusPage(data), "inbox": InboxPage(data, flt), "insights": InsightsPage(data)}
+        from deepworkai.ui.timetravel import TimelinePage
+        self.pages = {"focus": FocusPage(data),
+                      "timeline": TimelinePage(demo, demo_index, on_finish=self._travel_done),
+                      "inbox": InboxPage(data, flt), "insights": InsightsPage(data)}
         self.navs: dict[str, QPushButton] = {}
         self.nav_icons: dict[str, Icon] = {}
         for key, text, icon in self.TABS:
@@ -917,6 +990,64 @@ class Hub(QWidget):
         self.show_tab(tab if tab in self.pages else "focus")
         self._set_clock()
         t = QTimer(self); t.timeout.connect(self._tick); t.start(15_000)
+        # Fast, cheap loop: one stat() per file — commands from the service + dial state.
+        self.fast = QTimer(self); self.fast.timeout.connect(self._fast); self.fast.start(40)
+        if persistent:
+            self._read_cmd(initial=True)
+
+    # ── service → UI commands (data/ui_cmd.json) ──────────────────────────────
+    def _read_cmd(self, initial: bool = False):
+        f = DATA / "ui_cmd.json"
+        try:
+            m = f.stat().st_mtime
+        except OSError:
+            return
+        if m == self._cmd_mtime:
+            return
+        self._cmd_mtime = m
+        try:
+            cmd = json.loads(f.read_text())
+        except (OSError, ValueError):
+            return
+        if initial and time.time() - cmd.get("ts", 0) > 5:
+            return                                    # stale command from an earlier run
+        if cmd.get("action") == "hide":
+            self.hide(); return
+        if cmd.get("action") == "show":
+            self.present(cmd.get("tab", "focus"), cmd.get("focus_note", False),
+                         cmd.get("by_dial", False))
+
+    def present(self, tab: str, focus_note: bool = False, by_dial: bool = False):
+        self._by_dial = by_dial and (self.isHidden() or self._by_dial)
+        key = tab if tab in self.pages else "focus"
+        if self.isHidden() and self.stack.currentWidget() is self.pages[key]:
+            self.pages[key].refresh()         # was hidden: show fresh data, not stale
+        self.show_tab(key)
+        if not self.isVisible():
+            scr = QApplication.primaryScreen().availableGeometry()
+            self.move(scr.center() - self.rect().center())
+        self.show(); self.raise_(); self.activateWindow()
+        if focus_note and tab == "focus":
+            n = getattr(self.pages["focus"], "note", None)
+            if n is not None:
+                n.setFocus(); n.selectAll()
+
+    def _fast(self):
+        self._read_cmd()
+        tl = self.pages["timeline"]
+        if self.isVisible() or tl.dial_active():
+            tl.poll()
+
+    def _travel_done(self, result: str):
+        if self._by_dial:                 # the dial opened us — get out of the way
+            self._by_dial = False
+            self.hide()
+
+    def closeEvent(self, e):
+        if self.persistent:
+            e.ignore(); self.hide()       # stay warm in the background → instant next time
+        else:
+            super().closeEvent(e)
 
     def paintEvent(self, _):
         # Soft, crisp window shadow painted directly (no rasterising effect).
@@ -929,6 +1060,9 @@ class Hub(QWidget):
             p.drawRoundedRect(r.adjusted(-i, -i + 6, i, i + 6), 20 + i, 20 + i)
 
     def show_tab(self, key: str):
+        page = self.pages[key]
+        if hasattr(page, "refresh") and self.stack.currentWidget() is not page:
+            page.refresh()                # fresh data whenever a page is opened
         for k, b in self.navs.items():
             b.setChecked(k == key)
             self.nav_icons[k].color = QColor(SYS["blue"] if k == key else T["text2"])
@@ -941,15 +1075,21 @@ class Hub(QWidget):
         self.clock.setFont(font(12, QFont.Weight.DemiBold))
 
     def _tick(self):
+        if not self.isVisible():
+            return                        # no work at all while hidden
         self._set_clock()
         page = self.stack.currentWidget()
-        if isinstance(page, Page):
+        if isinstance(page, Page) and not (hasattr(page, "busy") and page.busy()):
             page.refresh()
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key.Key_Escape:
+            tl = self.pages["timeline"]
+            if tl.dial_active() and not tl.demo:
+                from deepworkai.ui.timetravel import _send
+                _send("TRAVEL_CLOSE")
             self.close()
-        elif e.key() in (Qt.Key.Key_1, Qt.Key.Key_2, Qt.Key.Key_3):
+        elif Qt.Key.Key_1 <= e.key() <= Qt.Key.Key_4 and not isinstance(QApplication.focusWidget(), (QLineEdit, QPlainTextEdit)):
             self.show_tab(self.TABS[e.key() - Qt.Key.Key_1][0])
 
     def mousePressEvent(self, e):
@@ -978,7 +1118,10 @@ def _apply_theme(mode: str, app: QApplication):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Deep Work AI Hub")
-    ap.add_argument("--tab", default="focus", choices=["focus", "inbox", "insights"])
+    ap.add_argument("--tab", default="focus", choices=["focus", "timeline", "inbox", "insights"])
+    ap.add_argument("--background", action="store_true",
+                    help="run as the single persistent UI, hidden until the service asks")
+    ap.add_argument("--demo-index", type=int, default=None, help=argparse.SUPPRESS)
     ap.add_argument("--filter", default="", help="HIGH|MEDIUM|LOW (inbox)")
     ap.add_argument("--theme", default="auto", choices=["auto", "light", "dark"])
     ap.add_argument("--demo", action="store_true")
@@ -988,15 +1131,32 @@ def main(argv=None):
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication.instance() or QApplication(sys.argv)
     _apply_theme(a.theme, app)
-    w = Hub(a.tab, a.filter.upper(), a.demo)
+    server = None
+    if a.background:
+        name = f"deepworkai-hub-{getpass_user()}"
+        probe = QLocalSocket(); probe.connectToServer(name)
+        if probe.waitForConnected(150):
+            return 0                       # one UI only — the running one handles commands
+        QLocalServer.removeServer(name)
+        server = QLocalServer(); server.listen(name)
+        app.setQuitOnLastWindowClosed(False)
+    w = Hub(a.tab, a.filter.upper(), a.demo, persistent=a.background, demo_index=a.demo_index)
+    w._server = server
     if a.screenshot:
         w.show(); app.processEvents()
         w.grab().save(a.screenshot)
         return 0
-    scr = app.primaryScreen().availableGeometry()
-    w.move(scr.center() - w.rect().center())
-    w.show(); w.activateWindow()
+    if not a.background:
+        w.present(a.tab)
     return app.exec()
+
+
+def getpass_user() -> str:
+    import getpass
+    try:
+        return "".join(c for c in getpass.getuser() if c.isalnum()) or "user"
+    except Exception:
+        return "user"
 
 
 if __name__ == "__main__":

@@ -1,15 +1,17 @@
 """
-Deep Work AI — Time Travel overlay
-==================================
-Shown while you turn the dial. Lists your saved moments as a timeline and, for
-the selected one, shows what you were doing: activity, focus, repo/branch,
-file, changed files, browser tabs and your note — so you know exactly where
-you are going before it restores.
+Deep Work AI — Time Travel page (lives inside the Hub)
+======================================================
+A timeline of your saved moments. For the selected one it shows what you were
+doing: activity, focus, repo/branch, file, changed files, browser tabs and
+your note — so you know exactly where you're going before it restores.
 
-Driven by the service through data/timetravel.json (selection index + ids).
-Click a moment to restore it, Esc to cancel. 100% local: reads data/*.db.
+Two ways in:
+  * the dial — the service moves the selection (data/timetravel.json) and
+    restores when you stop turning;
+  * the Hub sidebar — browse with the mouse wheel / ↑ ↓, Enter or click restores.
 
-  pythonw -m deepworkai.ui.timetravel [--demo] [--theme auto|light|dark]
+100% local: reads data/*.db read-only.
+  python -m deepworkai.ui.timetravel [--demo]   (opens the Hub on this page)
 """
 
 from __future__ import annotations
@@ -63,6 +65,10 @@ def _when(ts: str) -> tuple[str, str]:
     else:
         ago = f"{mins // 1440} d ago"
     return clock, ago
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
 
 
 def _domain(url: str) -> str:
@@ -144,13 +150,23 @@ class Moments:
                 "apps": ["Code", "Brave", "Windowsterminal"], "n_windows": 5}
 
 
-def _send(cmd: str):
+def _send(cmd: str) -> str:
+    """Send an authenticated command to the local service."""
+    try:
+        key = (DATA / ".session_key").read_text().strip()
+    except OSError:
+        return ""
     try:
         with socket.create_connection(("127.0.0.1", 57321), timeout=2) as s:
-            s.sendall((cmd + "\n").encode())
-            s.recv(256)
+            s.sendall(f"@{key} {cmd}\n".encode())
+            return s.recv(512).decode(errors="ignore")
     except OSError:
-        pass
+        return ""
+
+
+def recent_ids(limit: int = 40) -> list[str]:
+    return [r["id"] for r in _q(DATA / "capsules.db",
+                                "SELECT id FROM capsules ORDER BY timestamp DESC LIMIT ?", (limit,))]
 
 
 # ── Widgets ───────────────────────────────────────────────────────────────────
@@ -220,94 +236,108 @@ class Countdown(QWidget):
             p.drawRoundedRect(QRectF(0, 0, self.width() * self.frac, 4), 2, 2)
 
 
-# ── Window ────────────────────────────────────────────────────────────────────
-class TimeTravel(QWidget):
-    SHADOW = 18
+# ── Page ──────────────────────────────────────────────────────────────────────
+class TimelinePage(QWidget):
+    """Embedded in the Hub. `on_finish(result)` is called after a dial session ends."""
 
-    def __init__(self, demo: bool = False, demo_index: int = 1):
+    def __init__(self, demo: bool = False, demo_index: int | None = None, on_finish=None):
         super().__init__()
-        self.demo = demo
+        self.demo, self.on_finish = demo, on_finish
         self.moments = Moments(demo)
-        self.state = {"index": demo_index, "ids": [str(i) for i in range(12)], "open": True,
-                      "updated": time.time()} if demo else {}
+        self.local = {"ids": [], "index": -1}          # sidebar browsing (no dial)
+        self.state: dict = {}
+        if demo:
+            self.state = {"index": 1 if demo_index is None else demo_index,
+                          "ids": [str(i) for i in range(12)], "open": True, "updated": time.time()}
         self._mtime = 0.0
-        self._closing_at = 0.0
+        self._finishing_until = 0.0
+        self._last_sel = None
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
-        self.setWindowTitle("Time Travel")
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
-                            | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.resize(840 + 2 * self.SHADOW, 560 + 2 * self.SHADOW)
-
-        outer = QVBoxLayout(self)
-        s = self.SHADOW
-        outer.setContentsMargins(s, s - 4, s, s + 4)
-        root = QFrame(); root.setObjectName("root")
-        outer.addWidget(root)
-        body = QVBoxLayout(root); body.setContentsMargins(28, 22, 28, 20); body.setSpacing(16)
-
-        head = QHBoxLayout(); head.setSpacing(12)
-        head.addWidget(Icon("rewind", SYS["blue"], 40, 1.5, tile=True))
-        tl = QVBoxLayout(); tl.setSpacing(0)
-        tl.addWidget(label("Time Travel", 12, QFont.Weight.DemiBold, T["text2"], caps=True))
-        self.when = label("", 26, QFont.Weight.Bold, display=True)
-        tl.addWidget(self.when)
-        head.addLayout(tl); head.addStretch()
-        self.ago = label("", 15, QFont.Weight.Medium, T["text2"])
-        head.addWidget(self.ago, 0, Qt.AlignmentFlag.AlignBottom)
+        body = QVBoxLayout(self); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(14)
+        head = QHBoxLayout()
+        self.when = label("", 22, QFont.Weight.DemiBold, display=True)
+        self.ago = label("", 14, QFont.Weight.Medium, T["text2"])
+        head.addWidget(self.when); head.addSpacing(10)
+        head.addWidget(self.ago, 0, Qt.AlignmentFlag.AlignBottom); head.addStretch()
         body.addLayout(head)
 
-        main = QHBoxLayout(); main.setSpacing(20)
-        self.rail = Rail(self._go)
+        main = QHBoxLayout(); main.setSpacing(18)
+        self.rail = Rail(self._click)
         railbox = QVBoxLayout(); railbox.addWidget(self.rail); railbox.addStretch()
         main.addLayout(railbox, 0)
         self.detail, self.dl = card(22, 12)
         main.addWidget(self.detail, 1)
         body.addLayout(main, 1)
 
-        foot = QVBoxLayout(); foot.setSpacing(8)
         self.bar = Countdown()
-        foot.addWidget(self.bar)
-        hint = QHBoxLayout()
+        body.addWidget(self.bar)
+        foot = QHBoxLayout()
         self.hint = label("", 12.5, QFont.Weight.Medium, T["text2"])
-        hint.addWidget(self.hint); hint.addStretch()
-        hint.addWidget(label("Turn ← back · → towards now · stop to restore · click to jump · Esc to cancel",
-                             11.5, color=T["text3"]))
-        foot.addLayout(hint)
+        self.keys = label("", 11.5, color=T["text3"])
+        foot.addWidget(self.hint); foot.addStretch(); foot.addWidget(self.keys)
         body.addLayout(foot)
 
-        self.setStyleSheet(hub.qss())
-        self._last_sel = None
-        self._poll()
-        self.t = QTimer(self); self.t.timeout.connect(self._poll); self.t.start(33)
+    # ── modes ─────────────────────────────────────────────────────────────────
+    def dial_active(self) -> bool:
+        return bool(self.state.get("open")) or bool(self._finishing_until)
 
-    # state & rendering
-    def _poll(self):
-        if not self.demo:
-            try:
-                m = STATE.stat().st_mtime
-                if m != self._mtime:
-                    self._mtime = m
-                    self.state = json.loads(STATE.read_text())
-            except (OSError, ValueError):
-                pass
+    def view(self) -> tuple[list[str], int]:
+        if self.dial_active() or self.demo:
+            return self.state.get("ids", []), self.state.get("index", -1)
+        return self.local["ids"], self.local["index"]
+
+    def refresh(self):
+        """Called when the page is shown from the sidebar."""
+        if not self.dial_active() and not self.demo:
+            self.local["ids"] = recent_ids()
+            self.local["index"] = min(self.local["index"], len(self.local["ids"]) - 1)
+        self._last_sel = None
+        self.poll()
+
+    # ── polling (cheap: one stat() per tick) ──────────────────────────────────
+    def read_state(self) -> bool:
+        """Returns True if a new dial state arrived."""
+        if self.demo:
+            return False
+        try:
+            m = STATE.stat().st_mtime
+        except OSError:
+            return False
+        if m == self._mtime:
+            return False
+        self._mtime = m
+        try:
+            self.state = json.loads(STATE.read_text())
+        except (OSError, ValueError):
+            return False
+        return True
+
+    def poll(self):
+        fresh = self.read_state()
         st = self.state
-        if self._closing_at and time.time() > self._closing_at:
-            self.close(); return
-        if st.get("result") and not self._closing_at:
-            self._finish(st); return
-        if not self.demo and st and not st.get("open") and not st.get("result"):
-            self.close(); return
-        if not self.demo and st and time.time() - st.get("updated", 0) > 30:
-            self.close(); return                 # orphaned overlay safety net
-        sel = (st.get("index"), tuple(st.get("ids", [])))
+        now = time.time()
+        if fresh and st.get("result"):
+            self._finish(st)
+        if self._finishing_until and now > self._finishing_until:
+            self._finishing_until = 0.0
+            if self.on_finish:
+                self.on_finish(st.get("result", ""))
+            self._last_sel = None
+        ids, idx = self.view()
+        sel = (idx, tuple(ids), self.dial_active())
         if sel != self._last_sel:
             self._last_sel = sel
-            self._render()
-        elapsed = (time.time() - st.get("updated", time.time())) * 1000
-        idx = st.get("index", -1)
-        if not self._closing_at:
+            self._render(ids, idx)
+        self._update_footer(now)
+
+    def _update_footer(self, now: float):
+        if self._finishing_until:
+            return
+        if self.dial_active() and not self.demo or (self.demo and self.state.get("open")):
+            idx = self.state.get("index", -1)
+            elapsed = (now - self.state.get("updated", now)) * 1000
+            self.keys.setText("Dial ← back · → towards now · stop to restore · Esc cancels")
             if idx >= 0:
                 self.bar.frac = min(1.0, elapsed / COMMIT_MS)
                 left = max(0.0, (COMMIT_MS - elapsed) / 1000)
@@ -315,12 +345,15 @@ class TimeTravel(QWidget):
             else:
                 self.bar.frac = 0
                 self.hint.setText("You're at Now. Turn left to go back.")
-            self.bar.update()
+        else:
+            self.bar.frac = 0
+            self.keys.setText("Scroll or ↑ ↓ to browse · Enter or click to restore")
+            ids, idx = self.view()
+            self.hint.setText("Pick a moment to go back to." if ids else "")
+        self.bar.update()
 
-    def _render(self):
-        st = self.state
-        ids, idx = st.get("ids", []), st.get("index", -1)
-        # Rail: "Now" + snapshots, windowed around the selection
+    # ── rendering ─────────────────────────────────────────────────────────────
+    def _render(self, ids: list[str], idx: int):
         rows = [{"key": None, "time": "Now", "title": "Stay where you are", "color": SYS["green"],
                  "selected": idx < 0}]
         start = max(0, min(idx - VISIBLE // 2, len(ids) - (VISIBLE - 1)))
@@ -329,22 +362,22 @@ class TimeTravel(QWidget):
             name, _, color = ACTIVITY.get(m["activity"], ACTIVITY["idle"])
             clock, _ = _when(m["ts"])
             what = " · ".join(x for x in (name, m.get("repo") or m.get("file")) if x)
-            rows.append({"key": ids[j], "time": clock, "title": what, "color": color, "selected": j == idx})
+            rows.append({"key": j, "time": clock, "title": what, "color": color, "selected": j == idx})
         self.rail.set_rows(rows)
 
         clear(self.dl)
         if idx < 0 or idx >= len(ids):
             self.when.setText("Now")
-            self.ago.setText(f"{len(ids)} saved moments" if ids else "")
+            self.ago.setText(_plural(len(ids), "saved moment") if ids else "")
             self.dl.addStretch()
             ic = QHBoxLayout(); ic.addStretch(); ic.addWidget(Icon("clock", SYS["green"], 52, 1.4, tile=True)); ic.addStretch()
             self.dl.addLayout(ic)
+            msg = ("Turn the dial left, scroll, or press ↓ to walk back through your day. "
+                   "Each stop shows what you were doing." if ids else
+                   "No saved moments yet. They're captured automatically every 10 minutes while you "
+                   "work, when you start focusing, and when you save your spot.")
             for txt, px, wt, col in (("You're in the present", 20, QFont.Weight.DemiBold, None),
-                                     ("Turn the dial to the left to walk back through your day. "
-                                      "Each stop shows what you were doing." if ids else
-                                      "No saved moments yet. They're captured automatically while you "
-                                      "work, when you start focusing, and when you save your spot.",
-                                      13, QFont.Weight.Normal, T["text2"])):
+                                     (msg, 13, QFont.Weight.Normal, T["text2"])):
                 l = label(txt, px, wt, col, display=px > 15, wrap=True)
                 l.setAlignment(Qt.AlignmentFlag.AlignCenter); self.dl.addWidget(l)
             self.dl.addStretch()
@@ -374,11 +407,11 @@ class TimeTravel(QWidget):
         self.dl.addLayout(top)
 
         tags = QHBoxLayout(); tags.setSpacing(6)
-        tags.addWidget(capsule(SOURCE_LABEL.get(m["source"], m["source"].title() or "Saved"), SYS["gray"]))
+        tags.addWidget(capsule(SOURCE_LABEL.get(m["source"], (m["source"] or "saved").title()), SYS["gray"]))
         if m.get("n_windows"):
-            tags.addWidget(capsule(f"{m['n_windows']} windows", SYS["indigo"]))
+            tags.addWidget(capsule(_plural(m['n_windows'], "window"), SYS["indigo"]))
         if m.get("n_tabs"):
-            tags.addWidget(capsule(f"{m['n_tabs']} tabs", SYS["teal"]))
+            tags.addWidget(capsule(_plural(m['n_tabs'], "tab"), SYS["teal"]))
         tags.addStretch()
         self.dl.addLayout(tags)
 
@@ -410,55 +443,54 @@ class TimeTravel(QWidget):
             self.hint.setText(f"✓ Restoring your workspace from {clock}")
             self.bar.frac, self.bar.color = 1.0, QColor(SYS["green"])
             self.bar.update()
-            self._closing_at = time.time() + 1.4
+            self._finishing_until = time.time() + 1.4
         else:
-            self._closing_at = time.time() + 0.05
+            self._finishing_until = time.time() + 0.05
 
-    def closeEvent(self, e):
-        # Tool windows don't trigger quit-on-last-window; end the process ourselves.
-        super().closeEvent(e)
-        QApplication.quit()
-
-    def _go(self, cid: str):
-        if self.demo:
+    # ── local browsing (sidebar) ──────────────────────────────────────────────
+    def _move(self, delta: int):
+        if self.dial_active() or self.demo:
             return
-        _send(f"TRAVEL_GO:{cid}")
+        n = len(self.local["ids"])
+        self.local["index"] = max(-1, min(n - 1, self.local["index"] + delta))
+        self.poll()
+
+    def _restore_selected(self):
+        ids, idx = self.view()
+        if 0 <= idx < len(ids) and not self.demo:
+            m = self.moments.get(ids[idx])
+            clock, _ = _when(m.get("ts", ""))
+            self.hint.setText(f"✓ Restoring your workspace from {clock}")
+            _send(f"TRAVEL_GO:{ids[idx]}")
+
+    def _click(self, row_index: int):
+        if self.dial_active() and not self.demo:
+            ids, _ = self.view()
+            _send(f"TRAVEL_GO:{ids[row_index]}")
+            return
+        self.local["index"] = row_index
+        self.poll()
+        self._restore_selected()
+
+    def wheelEvent(self, e):
+        self._move(1 if e.angleDelta().y() < 0 else -1)
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key.Key_Escape:
-            if not self.demo:
-                _send("TRAVEL_CLOSE")
-            self.close()
-
-    def paintEvent(self, _):
-        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        s = self.SHADOW
-        r = QRectF(self.rect()).adjusted(s, s - 4, -s, -s - 4)
-        for i in range(s, 0, -1):
-            a = int(55 * (1 - i / s) ** 2)
-            p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(0, 0, 0, a // 3))
-            p.drawRoundedRect(r.adjusted(-i, -i + 6, i, i + 6), 20 + i, 20 + i)
+        k = e.key()
+        if k in (Qt.Key.Key_Down, Qt.Key.Key_J):
+            self._move(1)
+        elif k in (Qt.Key.Key_Up, Qt.Key.Key_K):
+            self._move(-1)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._restore_selected()
+        else:
+            super().keyPressEvent(e)
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Deep Work AI — Time Travel")
-    ap.add_argument("--theme", default="auto", choices=["auto", "light", "dark"])
-    ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--demo-index", type=int, default=1)
-    ap.add_argument("--screenshot", default="", help=argparse.SUPPRESS)
-    a = ap.parse_args(argv)
-    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    app = QApplication.instance() or QApplication(sys.argv)
-    hub._apply_theme(a.theme, app)
-    w = TimeTravel(a.demo, a.demo_index)
-    if a.screenshot:
-        w.show(); app.processEvents()
-        w.grab().save(a.screenshot)
-        return 0
-    scr = app.primaryScreen().availableGeometry()
-    w.move(scr.center() - w.rect().center())
-    w.show()
-    return app.exec()
+    """Compatibility entry point: open the Hub on the Time Travel page."""
+    args = list(argv if argv is not None else sys.argv[1:])
+    return hub.main(["--tab", "timeline"] + args)
 
 
 if __name__ == "__main__":

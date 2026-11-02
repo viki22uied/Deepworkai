@@ -281,11 +281,10 @@ python deepworkai/features/triage_dashboard.py --demo
 
 ### 7. Micro-Journal
 
-**What it does:** A hardware-triggered, frameless single-line input overlay. Press the button and a minimal text box appears over your current window. Type your next-step thought and press Enter — it vanishes and saves your note. The note is surfaced by Cognitive Rewind and Meeting Mode exit.
+**What it does:** Press Resume twice and the Hub opens with the *Next step* box focused. Type your next-step thought and press Enter (Shift+Enter for a new line); `Esc` hides the Hub again. The note is surfaced by Cognitive Rewind, Time Travel and Meeting Mode exit.
 
 **How it works:**
-- `micro_journal.py` spawns the overlay as a fresh `pythonw.exe` subprocess each time, so it always opens correctly even after being closed
-- The overlay (`_journal_overlay.py`) is a borderless PyQt6 window
+- The note box lives on the Hub's Focus page — the Hub is already running in the background, so it appears instantly
 - Notes are saved as plain text in `data/next_step.txt` (one note at a time — always overwrites)
 
 **Relevant commands:** `JOURNAL_CAPTURE`, `JOURNAL_SAVE:<text>`, `JOURNAL_GET`, `JOURNAL_CLEAR`
@@ -424,7 +423,7 @@ python deepworkai/features/triage_dashboard.py --demo
      ├── notification_classifier.py
      ├── notification_interceptor.py
      ├── meeting_mode.py
-     ├── micro_journal.py  ──► _journal_overlay.py (subprocess)
+     ├── micro_journal.py  (note box lives in the Hub)
      ├── context_anchor.py
      ├── smart_queue.py
      ├── blocker_radar.py
@@ -489,12 +488,17 @@ All commands are plain UTF-8 strings terminated with `\n`. Send them to `127.0.0
 | `AUTO_CAPTURE_ON` / `AUTO_CAPTURE_OFF` | Toggle automatic context capture |
 | `NOTIF_FEEDBACK:<sender>\|opened` | Teach the router which senders matter |
 
+**Authentication.** Every command except `PING` must be prefixed with `@<key> `. The service
+writes a fresh random key to `data/.session_key` on every start, readable only by your Windows
+account, so other users and programs that can't read your files can't drive it. The plugin and the
+Hub read it automatically.
+
 **Testing a command manually (PowerShell):**
 ```powershell
+$key = Get-Content data\.session_key
 $tcp = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 57321)
-$writer = New-Object System.IO.StreamWriter($tcp.GetStream())
-$writer.WriteLine("PING")
-$writer.Flush()
+$s = $tcp.GetStream(); $w = New-Object System.IO.StreamWriter($s); $r = New-Object System.IO.StreamReader($s)
+$w.WriteLine("@$key JOURNAL_GET"); $w.Flush(); $r.ReadLine()
 ```
 
 ---
@@ -612,13 +616,14 @@ deepworkai/
 │   │   ├── deepwork_service.py       # Core TCP socket server
 │   │   ├── deep_restore_core.py      # Workspace snapshot + restore engine
 │   │   ├── chromium_session.py       # Reads the tabs that are actually open (Brave/Chrome/Edge)
+│   │   ├── ide_context.py            # Which project/file you're in (VS Code/Cursor)
 │   │   ├── slack_integration.py      # Slack DND + context capsule management
 │   │   ├── lcd_state.py              # LCD display state synchronisation
 │   │   ├── proc_utils.py             # Hidden subprocess helpers
 │   │   └── paths.py                  # Centralised path constants
 │   ├── ui/
 │   │   ├── hub.py                    # The Hub window: Focus · Inbox · Insights
-│   │   └── timetravel.py             # Time Travel overlay shown while turning the dial
+│   │   └── timetravel.py             # Time Travel page inside the Hub
 │   ├── features/
 │   │   ├── workflow_intelligence.py  # Local AI: activity, focus score, auto-capture, routing
 │   │   ├── focus_mode.py             # Focus session start/stop/toggle
@@ -629,7 +634,6 @@ deepworkai/
 │   │   ├── notification_interceptor.py# Notification capture + routing
 │   │   ├── meeting_mode.py           # Meeting in/out orchestrator
 │   │   ├── micro_journal.py          # Next-step note capture
-│   │   ├── _journal_overlay.py       # PyQt6 overlay subprocess
 │   │   ├── context_anchor.py         # File:line save + restore
 │   │   ├── smart_queue.py            # Interruption queue
 │   │   ├── blocker_radar.py          # GitHub CI/PR poller
@@ -661,20 +665,20 @@ Three keys and the dial reach every feature. Press once, twice or three times qu
 | **Inbox** | Open the Hub (Triage if something is waiting, otherwise Focus) | Queue this interruption | Release everything held |
 | **Dial** | Time Travel: turn to go back, stop to restore (see below). During a debug session it steps the debugger (→ Step Over, ← Step Out) | | |
 
-### Time Travel overlay
+### Time Travel
 
-Turning the dial opens a timeline of your saved moments. Each stop shows **what you were doing then**:
+Turning the dial opens the Hub on its **Time Travel** page: a timeline of your saved moments. Each stop shows **what you were doing then**:
 the time and how long ago, the activity (coding, debugging, reviewing…), focus score, repo and branch,
 the file you were in, changed files, the browser tabs you had open and your Micro-Journal note.
 
 - Turn **←** to go further back, **→** towards *Now* (stopping on *Now* cancels; nothing changes)
 - Stop turning and the selected moment is restored after 2.5 s (a progress bar shows the countdown)
 - Or click any moment to jump straight to it; `Esc` cancels
+- You can also open Time Travel from the Hub sidebar and browse with the mouse wheel or ↑ ↓, Enter to restore
 
 Moments are saved automatically every 10 minutes while you're working (skipped when idle or when nothing
 changed), when you start Focus Shield, and when you press *Save my spot*. Automatic moments are pruned
-after `DEEPWORKAI_RETENTION_DAYS`; ones you saved yourself are kept. Preview it with
-`python -m deepworkai.ui.timetravel --demo`.
+after `DEEPWORKAI_RETENTION_DAYS`; ones you saved yourself are kept.
 
 Everything else runs on its own: the notification classifier and router, Focus Depth Timer,
 Blocker Radar, Git Branch Pulse and automatic context capture. The Hub's Focus tab shows
@@ -697,12 +701,20 @@ Emails, tokens/API keys and URL query strings are scrubbed before anything is wr
 GitHub/Jira/Slack are optional: they only run if you add your own tokens to `.env`, and they talk
 directly from your PC to your own accounts.
 
-**The Hub** (`deepworkai/ui/hub.py`) is the single window for everything you look at:
-- **Focus** — current activity, live focus score, "where was I", next step *(opens from Context Rewind)*
-- **Inbox** — notifications the AI held or batched, with the reason *(opens from Triage)*
+**The Hub** (`deepworkai/ui/hub.py`) is the one window for everything — no other popups:
+- **Focus** — current activity, live focus score, "where was I", next step (type it right here;
+  Resume ×2 jumps to the box), Cognitive Rewind, Blocker Radar, Terminal Palette
+- **Time Travel** — your saved moments and what you were doing in each
+- **Inbox** — notifications the AI held or batched, with the reason
 - **Insights** — your best focus hours, deep-work time, who interrupts you
 
-Keys: `1` `2` `3` switch tabs, `Esc` closes. Try it without any data: `python -m deepworkai.ui.hub --demo`
+The service starts the Hub hidden in the background, so a key press shows it in ~20 ms with fresh
+data; `Esc` hides it again. It always shows your real data; `--demo` exists only for previews:
+`python -m deepworkai.ui.hub --demo`. Keys: `1`–`4` switch pages.
+
+**Your data stays out of git.** `data/` and any `*.db` are ignored. If `data/capsules.db` is ever not
+a real database (for example a Git LFS pointer from a clone), it is moved aside and recreated
+instead of breaking capture and restore.
 
 ---
 
