@@ -11,3 +11,9 @@ pluginRuntime: nodejs
 entryPoint: index.mjs
 
 pluginCapabilities:
+
+# Marketplace
+license: MIT
+licenseUrl: https://github.com/viki22uied/Deepworkai/blob/main/EULA.md
+supportPageUrl: https://github.com/viki22uied/Deepworkai/issues
+homePageUrl: https://github.com/viki22uied/Deepworkai

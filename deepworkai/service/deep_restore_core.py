@@ -187,7 +187,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    log.info("[DB] Schema ready at %s", DB_PATH)
+    log.info("[DB] Schema ready (%s)", DB_PATH.name)
 
 
 # ── Dynamic EXE Discovery ─────────────────────────────────────────────────────
@@ -1116,8 +1116,7 @@ def restore_workspace(snapshot: dict, label: str = ""):
             reposition(hwnd, win.get("pos", {}), win.get("show_cmd", 1))
             placed.append((pname, hwnd, win))
             repositioned += 1
-            log.info("[RESTORE] ✓ %s '%s' → hwnd %s", pname,
-                     win.get("title", "")[:60], hwnd)
+            log.info("[RESTORE] ✓ %s → hwnd %s", pname, hwnd)   # no title: it holds page/song/file names
         else:
             log.warning("[RESTORE] All hwnds for '%s' already used — skipped", pname)
 

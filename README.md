@@ -714,7 +714,7 @@ Cognitive Rewind, Blocker Radar and the Terminal Palette (one click runs a comma
 
 ## Privacy, Offline Mode & the Hub
 
-See [PRIVACY.md](PRIVACY.md) for exactly what is stored and [SECURITY.md](SECURITY.md) for the security model and how to report a vulnerability.
+See [PRIVACY.md](PRIVACY.md) for exactly what is stored and [SECURITY.md](SECURITY.md) for the security model and how to report a vulnerability. Use of the plugin is covered by the [End User License Agreement](EULA.md) and the [MIT License](LICENSE).
 
 
 **Everything runs on your PC.** There is no Deep Work AI server, account, or telemetry — nothing is ever sent to us.

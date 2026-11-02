@@ -153,3 +153,18 @@ def test_github_repo_and_branch_are_validated(monkeypatch):
 
 
 REPO = ["acme/api"]
+
+
+def test_restore_logs_no_window_titles(monkeypatch, caplog):
+    import logging
+    import importlib.util  # the real module: conftest stubs deep_restore_core for service tests
+    from conftest import ROOT
+    spec = importlib.util.spec_from_file_location("drc_real", ROOT / "deepworkai" / "service" / "deep_restore_core.py")
+    core = importlib.util.module_from_spec(spec); spec.loader.exec_module(core)
+    monkeypatch.setattr(core, "enum_windows", lambda: [])
+    monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {"code.exe": [{"hwnd": 7, "title": "x"}]})
+    monkeypatch.setattr(core, "reposition", lambda *a: None)
+    with caplog.at_level(logging.DEBUG):
+        core.restore_workspace({"windows": [{"process": "code.exe", "title": "secret-salary.xlsx - Code"}],
+                                "browsers": {}, "tabs_format": core.TABS_FORMAT})
+    assert "secret-salary" not in caplog.text

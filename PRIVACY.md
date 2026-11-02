@@ -3,8 +3,9 @@
 _Last updated: November 2026_
 
 **Deep Work AI collects nothing.** It has no servers, no accounts, no analytics and no telemetry.
-Everything it records stays on your PC, in the `data/` folder of the app, readable only by your
-Windows user account.
+Everything it records stays on your PC, readable only by your Windows user account: in
+`%LOCALAPPDATA%\DeepWorkAI\data` for the installed plugin, or the `data/` folder when running from
+source.
 
 ## What is stored on your PC
 
@@ -33,8 +34,10 @@ network access off.
 
 ## Deleting your data
 
-Close Deep Work AI and delete the `data/` folder. To remove stored tokens:
-`python -m deepworkai.service.secrets_store delete SLACK_TOKEN` (and likewise for the others).
+Uninstall the plugin in Logi Options+, then delete `%LOCALAPPDATA%\DeepWorkAI` (or the `data/`
+folder when running from source). That removes everything, including stored tokens. To remove only
+a token, run `DeepWorkAI.exe --secrets delete SLACK_TOKEN` from the plugin's `assetspp\DeepWorkAI`
+folder (from source: `python -m deepworkai.service.secrets_store delete SLACK_TOKEN`).
 
 ## Contact
 
