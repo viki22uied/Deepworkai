@@ -33,6 +33,7 @@ Full command list:
 
 import ctypes
 import json
+import os
 import logging
 import signal
 import socket
@@ -81,10 +82,10 @@ _VALID_COMMANDS = {
     "STATUS", "PING", "OPEN_TRASH",
     "WORKFLOW_STATUS", "WHERE_WAS_I", "INSIGHTS",
     "AUTO_CAPTURE_ON", "AUTO_CAPTURE_OFF", "RELEASE_HELD",
-    "RESUME", "HUB", "SAVE_SPOT",
+    "RESUME", "HUB", "SAVE_SPOT", "TRAVEL_COMMIT", "TRAVEL_CLOSE",
 }
 _VALID_PREFIX_COMMANDS = {
-    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK", "DIAL",
+    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK", "DIAL", "TRAVEL_GO",
     "PALETTE", "DEBUG_ACTION", "HAPTIC_PULSE",
 }
 
@@ -185,9 +186,30 @@ def _start_dnd_guard():
 
 
 # ── Command handlers ───────────────────────────────────────────────────────────
-def _handle_capture() -> str:
+def _moment_context() -> dict:
+    """What you were doing right now — stored with each snapshot for Time Travel."""
+    ctx: dict = {}
+    try:
+        st = _intel().current_state()
+        ctx.update(activity=st.activity, focus_score=st.focus_score,
+                   repo=st.repo, branch=st.branch, deep_minutes=st.deep_minutes)
+    except Exception:
+        pass
+    try:
+        from deepworkai.features.cognitive_rewind import build_rewind_context
+        rw = build_rewind_context(minutes=15)
+        ctx["file"] = rw.get("last_ide_file") or ""
+        ctx["next_step"] = rw.get("next_step") or ""
+        ctx["changed_files"] = ((rw.get("git") or {}).get("changed_files") or [])[:5]
+        ctx["tabs"] = rw.get("browser_tabs", [])[:5]
+    except Exception:
+        pass
+    return ctx
+
+
+def _handle_capture(name: str = "hardware") -> str:
     snap = core.capture_workspace()
-    cid  = core.save_snapshot(snap, "hardware")
+    cid  = core.save_snapshot(snap, name, context=_moment_context())
     return (f"OK CAPTURE id={cid[:8]} "
             f"windows={len(snap.get('windows', []))} "
             f"tabs={sum(len(v) for v in snap.get('browsers', {}).values())}")
@@ -478,6 +500,107 @@ def _handle_hub() -> str:
     return _handle_triage_show("inbox" if waiting else "focus").replace("TRIAGE_SHOW", "HUB", 1)
 
 
+# ── Time Travel (dial + overlay) ───────────────────────────────────────────────
+TRAVEL_FILE = DATA_DIR / "timetravel.json"
+TRAVEL_SPAN = 40                              # snapshots reachable on the dial
+_travel = {"items": [], "index": -1, "open": False}
+_travel_proc = None
+
+
+def _travel_write(**extra):
+    state = {"index": _travel["index"], "ids": [i["id"] for i in _travel["items"]],
+             "open": _travel["open"], "updated": time.time(), **extra}
+    try:
+        tmp = TRAVEL_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state))
+        tmp.replace(TRAVEL_FILE)              # atomic: overlay never reads half a file
+    except Exception as e:
+        log.debug("[TRAVEL] state write: %s", e)
+
+
+def _travel_show_overlay():
+    global _travel_proc
+    if _travel_proc and _travel_proc.poll() is None:
+        return
+    pythonw = Path(sys.executable).parent / "pythonw.exe"
+    interp  = str(pythonw) if pythonw.exists() else sys.executable
+    try:
+        _travel_proc = subprocess.Popen(
+            [interp, "-m", "deepworkai.ui.timetravel"], cwd=str(PROJECT_ROOT),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        log.warning("[TRAVEL] overlay failed: %s", e)
+
+
+def _travel_step(tick: int) -> str:
+    """Counter-clockwise (tick<0) = further back; clockwise = towards now."""
+    if not _travel["open"]:
+        _travel["items"] = core.get_recent_snapshots(limit=TRAVEL_SPAN)
+        _travel["index"] = -1                 # -1 = "Now" (nothing to restore)
+        _travel["open"] = True
+    n = len(_travel["items"])
+    _travel["index"] = max(-1, min(n - 1, _travel["index"] - tick))
+    _travel_write()
+    _travel_show_overlay()
+    return f"OK DIAL travel index={_travel['index']} of={n}"
+
+
+def _travel_restore(cid: str) -> str:
+    snap, ts, summary = core.load_snapshot_by_id(cid)
+    if not snap:
+        return f"ERROR TRAVEL no snapshot {cid[:8]}"
+    threading.Thread(target=core.restore_workspace, args=(snap, ts),
+                     daemon=True, name="TravelRestore").start()
+    return f"OK TRAVEL restored {ts} {summary}"
+
+
+def _handle_travel_commit() -> str:
+    """Dial stopped: restore the selected moment (or cancel if on 'Now')."""
+    if not _travel["open"]:
+        return "OK TRAVEL idle"
+    idx, items = _travel["index"], _travel["items"]
+    _travel["open"] = False
+    if idx < 0 or idx >= len(items):
+        _travel_write(result="cancel")
+        return "OK TRAVEL cancel"
+    _travel_write(result="restore", restored=items[idx]["id"])
+    return _travel_restore(items[idx]["id"])
+
+
+def _handle_travel_go(cid: str) -> str:
+    """Overlay click: restore a specific snapshot."""
+    _travel["open"] = False
+    _travel_write(result="restore", restored=cid)
+    return _travel_restore(cid.strip())
+
+
+def _handle_travel_close() -> str:
+    _travel["open"] = False
+    _travel_write(result="cancel")
+    return "OK TRAVEL closed"
+
+
+def _auto_snapshot_loop():
+    """Every 10 min while you're actually working, keep a moment for Time Travel."""
+    last_sig = None
+    while True:
+        time.sleep(600)
+        try:
+            st = _intel().current_state()
+            if st.activity == "idle":
+                continue
+            sig = (st.activity, st.repo, st.branch, st.top_app)
+            if sig == last_sig and st.focus_score < 60:
+                continue                      # nothing new and not deep — skip
+            last_sig = sig
+            _handle_capture("auto")
+            core.prune_auto_snapshots(days=int(os.environ.get("DEEPWORKAI_RETENTION_DAYS", "14")))
+        except Exception as e:
+            log.debug("[TRAVEL] auto snapshot: %s", e)
+
+
 def _handle_dial(arg: str) -> str:
     """Context-aware dial: steps the debugger during a debug session, else time travel."""
     try:
@@ -495,7 +618,9 @@ def _handle_dial(arg: str) -> str:
         for _ in range(min(abs(tick), 5)):
             execute_debug_action(action)
         return f"OK DIAL debug {action}"
-    return "OK DIAL travel"
+    if tick == 0:
+        return "OK DIAL travel noop"
+    return _travel_step(tick)
 
 
 def _handle_workflow_status() -> str:
@@ -577,6 +702,9 @@ def handle_command(raw: str) -> str:
         if command == "RESUME":           return _handle_resume()
         if command == "SAVE_SPOT":        return _handle_save_spot()
         if command == "DIAL":             return _handle_dial(arg)
+        if command == "TRAVEL_COMMIT":    return _handle_travel_commit()
+        if command == "TRAVEL_GO":        return _handle_travel_go(arg)
+        if command == "TRAVEL_CLOSE":     return _handle_travel_close()
         if command == "HUB":              return _handle_hub()
         if command == "WORKFLOW_STATUS":  return _handle_workflow_status()
         if command == "WHERE_WAS_I":      return _handle_where_was_i()
@@ -651,6 +779,8 @@ def main():
         log.info("[INTEL] recorder + workflow engine running")
     except Exception as e:
         log.error("[INTEL] failed to start: %s", e)
+
+    threading.Thread(target=_auto_snapshot_loop, daemon=True, name="AutoSnapshot").start()
 
     # Blocker Radar, Git Pulse, Debug watcher, palette — run here so they work
     # no matter how the service was started (plugin auto-spawn or start.py).
