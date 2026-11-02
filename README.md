@@ -688,6 +688,9 @@ Cognitive Rewind, Blocker Radar and the Terminal Palette (one click runs a comma
 
 ## Privacy, Offline Mode & the Hub
 
+See [PRIVACY.md](PRIVACY.md) for exactly what is stored and [SECURITY.md](SECURITY.md) for the security model and how to report a vulnerability.
+
+
 **Everything runs on your PC.** There is no Deep Work AI server, account, or telemetry — nothing is ever sent to us.
 All data lives in `data/` inside your project folder (SQLite files you can delete at any time).
 
