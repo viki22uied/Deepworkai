@@ -98,7 +98,6 @@ This installs:
 | `psutil >= 5.9.0` | Process detection, freezing, and CPU priority management |
 | `requests >= 2.31.0` | HTTP calls to Slack, GitHub, and Jira APIs |
 | `PyQt6 >= 6.5.0` | Micro-journal overlay UI (frameless input box) |
-| `scikit-learn >= 1.3.0` | TF-IDF + Logistic Regression notification priority classifier |
 | `python-dotenv >= 1.0.0` | Loads your `.env` file at startup |
 | `pyautogui >= 0.9.54` | Debug surface keyboard shortcut injection |
 
@@ -254,10 +253,10 @@ python deepworkai/features/triage_dashboard.py --demo
 **How it works (two-stage pipeline):**
 
 1. **Rule-based fast path** — Regex and keyword matching catches obvious cases instantly (e.g., "URGENT", "PROD down", your name mentioned, direct messages)
-2. **TF-IDF + Logistic Regression** — A scikit-learn model trained on bootstrap-labelled notification data classifies anything the rules don't catch confidently
+2. **TF-IDF + Logistic Regression** — a tiny pure-Python model (`tiny_ml.py`, no scikit-learn/numpy) trained on bootstrap-labelled notification data classifies anything the rules don't catch confidently. It gives the same predictions as the scikit-learn version while saving ~130 MB of RAM
 3. **Confidence threshold** — Anything below 60% confidence falls back to `MEDIUM`
 
-**Graceful degradation:** If `scikit-learn` is not installed, the system falls back to rules-only classification without crashing.
+**No heavy dependencies:** the model trains in ~0.2 s and scores a notification in ~0.02 ms.
 
 **Storage:** All notifications are persisted in `data/notifications.db` with full metadata: source, title, body, sender, channel, URL, priority, confidence score, arrival time, and reviewed/held flags.
 
@@ -630,7 +629,8 @@ deepworkai/
 │   │   ├── focus_timer.py            # Elapsed focus time → LCD
 │   │   ├── cognitive_rewind.py       # Context summary builder
 │   │   ├── triage_dashboard.py       # Opens the Hub on the Inbox tab
-│   │   ├── notification_classifier.py# AI priority engine (rules + sklearn)
+│   │   ├── notification_classifier.py# AI priority engine (rules + tiny_ml)
+│   │   ├── tiny_ml.py                # Dependency-free TF-IDF + logistic regression
 │   │   ├── notification_interceptor.py# Notification capture + routing
 │   │   ├── meeting_mode.py           # Meeting in/out orchestrator
 │   │   ├── micro_journal.py          # Next-step note capture
@@ -712,6 +712,25 @@ The service starts the Hub hidden in the background, so a key press shows it in 
 data; `Esc` hides it again. It always shows your real data; `--demo` exists only for previews:
 `python -m deepworkai.ui.hub --demo`. Keys: `1`–`4` switch pages.
 
+**Your secrets are encrypted.** API tokens belong in the encrypted vault, not in `.env`:
+
+```bash
+python -m deepworkai.service.secrets_store import-env
+```
+
+That moves `SLACK_TOKEN`, `GITHUB_TOKEN` and `JIRA_TOKEN` from `.env` into `data/secrets.bin`, encrypted with
+Windows DPAPI so only your Windows account on this PC can decrypt it, and blanks them in `.env`. Add or
+change one with `python -m deepworkai.service.secrets_store set GITHUB_TOKEN` (input is hidden). The service
+warns in its log if a token is still in plain text. Also:
+- the whole `data/` folder is restricted to your Windows user at startup
+- logs never contain message text, senders, notes, file names or URLs — only command names and OK/ERROR
+- saved browser tabs are stripped of secret-looking URL parameters (reset tokens, OAuth codes, sessions, signatures)
+- notification bodies are deleted after `DEEPWORKAI_RETENTION_DAYS` like everything else
+
+**Light on memory.** The background service uses about 30 MB (it used ~160 MB with scikit-learn). The Hub
+uses about 70–85 MB while open or warm; after 20 minutes hidden it exits to free that memory and restarts on
+the next key press (`DEEPWORKAI_UI_KEEPALIVE_MIN`, `0` keeps it warm forever).
+
 **Your data stays out of git.** `data/` and any `*.db` are ignored. If `data/capsules.db` is ever not
 a real database (for example a Git LFS pointer from a clone), it is moved aside and recreated
 instead of breaking capture and restore.
@@ -751,8 +770,7 @@ instead of breaking capture and restore.
 
 ### Notification classifier crashing
 
-- Run `pip install scikit-learn` if you skipped optional dependencies
-- The system falls back to rules-only classification if sklearn is unavailable — check `data/service.log` for the fallback warning
+- The classifier has no extra dependencies; check `data/service.log` for `[CLASSIFIER]` lines
 
 ### Terminal Palette not opening
 
