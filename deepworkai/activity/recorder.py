@@ -40,6 +40,8 @@ DEVELOPER_APPS = {
     "rider64.exe":         "Rider",
     "webstorm64.exe":      "WebStorm",
     "idea64.exe":          "IntelliJ",
+    "claude.exe":          "Claude",
+    "windsurf.exe":        "Windsurf",
     "powershell.exe":      "PowerShell",
     "windowsterminal.exe": "Terminal",
     "cmd.exe":             "CMD",
@@ -170,8 +172,8 @@ def get_git_context(workspace: str) -> dict:
         return _git_cache["ctx"]
     try:
         root = run_hidden(["git", "rev-parse", "--show-toplevel"], cwd=workspace, timeout=3)
-        if root.returncode != 0:
-            ctx: dict = {}
+        if root.returncode != 0:              # not a git repo: still name the folder you're in
+            ctx: dict = {"repo": Path(workspace).name, "path": workspace} if workspace and Path(workspace).is_dir() else {}
         else:
             cwd    = root.stdout.strip()
             branch = run_hidden(["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -212,6 +214,39 @@ def get_open_browser_tabs() -> list[str]:
         return []
 
 
+_SHELLS = {"claude.exe", "bash.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "node.exe", "wsl.exe"}
+
+
+def _is_project_dir(cwd: str) -> bool:
+    """A folder you work in — not the home folder, Windows, Program Files or app data."""
+    p = Path(cwd).resolve()
+    home = Path.home().resolve()
+    if p == home or p == Path(p.anchor) or not p.is_dir():
+        return False
+    low = str(p).lower()
+    return not any(x in low for x in ("\\windows", "\\program files", "\\appdata\\", "\\programdata"))
+
+
+def _recent_shell_workspace() -> str:
+    """Folder of the most recently started agent/shell: the project you're in now.
+
+    Claude and terminals don't name the project in their window title, so the newest
+    process working in a repo (an agent session, or a command it just ran) is the best signal.
+    """
+    import psutil
+    best, best_t = "", 0.0
+    for p in psutil.process_iter(["name", "cwd", "create_time"]):
+        try:
+            cwd = p.info["cwd"] or ""
+            if (p.info["name"] or "").lower() not in _SHELLS or not cwd or p.info["create_time"] <= best_t:
+                continue
+            if _is_project_dir(cwd):
+                best, best_t = cwd, p.info["create_time"]
+        except (psutil.Error, OSError):
+            pass
+    return best
+
+
 def record_loop(stop_event=None):
     setup_db()
     log.info("Activity recorder started. Polling every %ds.", POLL_INTERVAL)
@@ -239,6 +274,8 @@ def record_loop(stop_event=None):
             # Which project are we in? (from the IDE window title + VS Code/Cursor state)
             if window and window["label"] in ("VS Code", "Cursor"):
                 workspace = active_workspace(window["title"]) or workspace
+            elif window and window["label"] in ("Claude", "Terminal", "PowerShell", "CMD", "Windsurf"):
+                workspace = _recent_shell_workspace() or workspace
             elif not workspace:
                 workspace = active_workspace()
 

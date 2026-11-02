@@ -69,24 +69,33 @@ def run_slot(slot_index: int) -> str:
     if not cmd:
         return f"slot {slot_index} ({label}) is empty — edit data/palette.json"
 
+    # Run in the project you're working in, not the app's install folder.
+    try:
+        from deepworkai.activity.recorder import _git_cache
+        project = (_git_cache.get("ctx") or {}).get("path", "")
+    except Exception:
+        project = ""
+    if not project or not Path(project).is_dir():
+        return f"{label}: no project detected yet — open your project in an editor, Claude or a terminal"
+
     try:
         if sys.platform == "win32":
             # Open in a new Windows Terminal tab (visible window — user needs to see output)
             subprocess.Popen(
                 ["wt", "--window", "0", "new-tab",
-                 "--title", label,
+                 "--title", label, "--startingDirectory", project,
                  "powershell", "-NoExit", "-Command", cmd],
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             subprocess.Popen(["bash", "-c", f'osascript -e \'tell app "Terminal" to do script "{cmd}"\''])
-        return f"▶ {label}: {cmd}"
+        return f"▶ {label}: {cmd} in {Path(project).name}"
     except FileNotFoundError:
         # wt.exe not found — fall back to plain PowerShell window
         try:
             subprocess.Popen(
                 ["powershell", "-NoExit", "-Command", cmd],
-                creationflags=0,   # visible window
+                cwd=project, creationflags=0,   # visible window
             )
             return f"▶ {label} (powershell fallback)"
         except Exception as e2:

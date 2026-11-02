@@ -41,6 +41,13 @@ kernel32 = ctypes.windll.kernel32
 # One data folder for the whole app (<repo>/data) — the UI reads snapshots from here.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
+
+# Real pixel coordinates. Without this, at 125 %+ display scaling Windows hands us scaled
+# positions for DPI-aware apps (browsers, editors) and restored windows land off target.
+try:
+    ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))   # per-monitor v2
+except (AttributeError, OSError):
+    pass
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "capsules.db"
 LOG_PATH = DATA_DIR / "service.log"
@@ -1075,6 +1082,7 @@ def restore_workspace(snapshot: dict, label: str = ""):
 
     used_hwnds: set = set()
     repositioned  = 0
+    placed: list = []
 
     for win in windows:
         pname = win.get("process", "").lower()
@@ -1106,11 +1114,20 @@ def restore_workspace(snapshot: dict, label: str = ""):
         if hwnd:
             used_hwnds.add(hwnd)
             reposition(hwnd, win.get("pos", {}), win.get("show_cmd", 1))
+            placed.append((pname, hwnd, win))
             repositioned += 1
             log.info("[RESTORE] ✓ %s '%s' → hwnd %s", pname,
                      win.get("title", "")[:60], hwnd)
         else:
             log.warning("[RESTORE] All hwnds for '%s' already used — skipped", pname)
+
+    # Apps that just opened (browsers especially) re-apply their own remembered size a moment
+    # later; place them once more after they've settled.
+    if newly_launched:
+        time.sleep(2.0)
+        for pname, hwnd, win in placed:
+            if pname in newly_launched and user32.IsWindow(hwnd):
+                reposition(hwnd, win.get("pos", {}), win.get("show_cmd", 1))
 
     log.info("[RESTORE] Complete. %d/%d windows repositioned.", repositioned, len(windows))
 

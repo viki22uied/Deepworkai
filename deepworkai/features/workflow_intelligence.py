@@ -80,7 +80,8 @@ def redact(text: str) -> str:
 
 
 # ── Workflow understanding ───────────────────────────────────────────────────
-IDE_APPS      = {"VS Code", "Cursor", "Visual Studio", "PyCharm", "Rider", "WebStorm", "IntelliJ"}
+IDE_APPS      = {"VS Code", "Cursor", "Visual Studio", "PyCharm", "Rider", "WebStorm", "IntelliJ",
+                 "Claude", "Windsurf"}                     # AI coding apps count as coding
 TERMINAL_APPS = {"PowerShell", "Terminal", "CMD"}
 BROWSER_APPS  = {"Chrome", "Edge", "Brave", "Firefox", "Browser"}
 CHAT_APPS     = {"Slack", "Teams", "Outlook", "Discord"}
