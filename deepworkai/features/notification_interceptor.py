@@ -101,6 +101,9 @@ def _poll_loop():
 
 def _poll_all():
     """Run all source pollers; each is independent and silently fails."""
+    import os
+    if os.environ.get("DEEPWORKAI_OFFLINE") == "1":
+        return
     _poll_github()
     _poll_jira()
     _poll_slack()

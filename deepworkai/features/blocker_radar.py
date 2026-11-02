@@ -40,6 +40,8 @@ def _cfg(key: str) -> str:
 
 
 def _gh(endpoint: str) -> dict | list | None:
+    if os.environ.get("DEEPWORKAI_OFFLINE") == "1":
+        return None
     token = _cfg("GITHUB_TOKEN")
     repo  = _cfg("GITHUB_REPO")
     if not token or not repo:
