@@ -8,6 +8,9 @@
  * expose dial-press events through execute(). The "rotate and pause"
  * UX is better anyway — no separate press needed.
  *
+ * Context-aware: while a debug session is running the dial steps the
+ * debugger instead (→ Step Over, ← Step Out). The service decides.
+ *
  * ← rotate left  = go further back in time  (more minutes)
  * → rotate right = come forward in time     (fewer minutes)
  * Stop turning   = auto-restores after 1 second
@@ -70,6 +73,24 @@ export class TimeTravelAction extends AdjustmentAction {
    */
   execute(event) {
     const tick = Number.isFinite(event?.tick) ? event.tick : 0;
+    // Return immediately; route the tick asynchronously.
+    this._route(tick);
+  }
+
+  async _route(tick) {
+    if (tick !== 0) {
+      try {
+        const r = await sendCommand(`DIAL:${tick}`);
+        if (r.includes('debug')) {
+          log(`[DIAL] ${r}`);
+          return;                     // debugger consumed the tick
+        }
+      } catch (_) { /* service down → fall through to time travel */ }
+    }
+    this._travel(tick);
+  }
+
+  _travel(tick) {
 
     if (tick === 0) {
       // Some SDK versions call execute(tick=0) for press — treat same as pause

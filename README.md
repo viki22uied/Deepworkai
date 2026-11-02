@@ -230,7 +230,7 @@ LOG_LEVEL=INFO
 **What it does:** Opens a rich dark-mode GUI ("Holding Tank") showing every notification that arrived during a Focus Shield session, sorted by AI-assigned priority (HIGH → MEDIUM → LOW). You review them all at once when you surface from deep work, not one-by-one during it.
 
 **How it works:**
-- Built with `tkinter` (no extra dependencies)
+- Opens the **Inbox** tab of the Hub (PyQt6, Apple-style light/dark design; see *Privacy, Offline Mode & the Hub*)
 - Pulls all unreviewed notifications from `data/notifications.db` via the classifier module
 - Displays source (Slack / Jira / GitHub), sender, channel, body, confidence score, and relative arrival time
 - Supports filtering by priority level: `--filter HIGH`
@@ -475,6 +475,16 @@ All commands are plain UTF-8 strings terminated with `\n`. Send them to `127.0.0
 | `HAPTIC_PULSE:<N>` | Trigger N haptic pulses on hardware |
 | `NOTIF_ADD:<src>\|<title>\|<body>` | Manually inject a notification |
 | `OPEN_TRASH` | Open the Windows Recycle Bin |
+| `RESUME` | Restore workspace + anchored line, open the Focus view (Resume key ×1) |
+| `SAVE_SPOT` | Capture workspace + anchor file:line (Focus key ×3) |
+| `HUB` | Open the Hub on Inbox if items are waiting, else Focus (Inbox key ×1) |
+| `DIAL:<ticks>` | Context-aware dial: steps the debugger during a debug session, else time travel |
+| `WORKFLOW_STATUS` | Current activity + focus score as JSON |
+| `WHERE_WAS_I` | Last automatically captured context |
+| `INSIGHTS` | 7-day focus analytics as JSON |
+| `RELEASE_HELD` | Release every held/batched notification (Inbox key ×3) |
+| `AUTO_CAPTURE_ON` / `AUTO_CAPTURE_OFF` | Toggle automatic context capture |
+| `NOTIF_FEEDBACK:<sender>\|opened` | Teach the router which senders matter |
 
 **Testing a command manually (PowerShell):**
 ```powershell
@@ -598,15 +608,19 @@ deepworkai/
 │   ├── service/
 │   │   ├── deepwork_service.py       # Core TCP socket server
 │   │   ├── deep_restore_core.py      # Workspace snapshot + restore engine
+│   │   ├── chromium_session.py       # Reads the tabs that are actually open (Brave/Chrome/Edge)
 │   │   ├── slack_integration.py      # Slack DND + context capsule management
 │   │   ├── lcd_state.py              # LCD display state synchronisation
 │   │   ├── proc_utils.py             # Hidden subprocess helpers
 │   │   └── paths.py                  # Centralised path constants
+│   ├── ui/
+│   │   └── hub.py                    # The Hub window: Focus · Inbox · Insights
 │   ├── features/
+│   │   ├── workflow_intelligence.py  # Local AI: activity, focus score, auto-capture, routing
 │   │   ├── focus_mode.py             # Focus session start/stop/toggle
 │   │   ├── focus_timer.py            # Elapsed focus time → LCD
 │   │   ├── cognitive_rewind.py       # Context summary builder
-│   │   ├── triage_dashboard.py       # Notification review GUI (tkinter)
+│   │   ├── triage_dashboard.py       # Opens the Hub on the Inbox tab
 │   │   ├── notification_classifier.py# AI priority engine (rules + sklearn)
 │   │   ├── notification_interceptor.py# Notification capture + routing
 │   │   ├── meeting_mode.py           # Meeting in/out orchestrator
@@ -634,16 +648,18 @@ deepworkai/
 
 ## The Rule of Three (keypad layout)
 
-Three keys and the dial do everything. Press once, twice or three times quickly:
+Three keys and the dial reach every feature. Press once, twice or three times quickly:
 
 | Key | 1 press | 2 presses | 3 presses |
 |---|---|---|---|
-| **Focus** | Focus Shield on/off (saves your workspace first) | Meeting mode on/off | — |
-| **Resume** | Restore workspace + show "where was I" | Write a next-step note | — |
-| **Inbox** | Open the Hub (Inbox if something is waiting, otherwise Focus) | Queue this interruption | Release everything held |
-| **Dial** | Turn to travel back in time; stop turning to restore | | |
+| **Focus** | Focus Shield on/off (saves your workspace first) | Meeting Mode on/off | Save my spot (snapshot + Context Anchor) |
+| **Resume** | Restore workspace, jump back to the anchored line, show Cognitive Rewind | Micro-Journal note | — |
+| **Inbox** | Open the Hub (Triage if something is waiting, otherwise Focus) | Queue this interruption | Release everything held |
+| **Dial** | Time Travel: turn to go back, stop to restore. During a debug session it steps the debugger (→ Step Over, ← Step Out) | | |
 
-There is no Capture key: context is saved automatically when you start focusing and when an interruption pulls you out of deep focus.
+Everything else runs on its own: the notification classifier and router, Focus Depth Timer,
+Blocker Radar, Git Branch Pulse and automatic context capture. The Hub's Focus tab shows
+Cognitive Rewind, Blocker Radar and the Terminal Palette (one click runs a command).
 
 ---
 

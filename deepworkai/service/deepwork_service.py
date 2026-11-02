@@ -81,10 +81,10 @@ _VALID_COMMANDS = {
     "STATUS", "PING", "OPEN_TRASH",
     "WORKFLOW_STATUS", "WHERE_WAS_I", "INSIGHTS",
     "AUTO_CAPTURE_ON", "AUTO_CAPTURE_OFF", "RELEASE_HELD",
-    "RESUME", "HUB",
+    "RESUME", "HUB", "SAVE_SPOT",
 }
 _VALID_PREFIX_COMMANDS = {
-    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK",
+    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK", "DIAL",
     "PALETTE", "DEBUG_ACTION", "HAPTIC_PULSE",
 }
 
@@ -442,9 +442,27 @@ def _intel():
     return wi
 
 
+def _handle_save_spot() -> str:
+    """Focus key x3: snapshot the workspace and anchor the exact file:line."""
+    cap = _handle_capture()
+    try:
+        anchor = _handle_anchor_save()
+    except Exception as e:
+        anchor = f"anchor unavailable ({e})"
+    return f"OK SAVE_SPOT {cap[3:]} | {anchor[3:]}"
+
+
 def _handle_resume() -> str:
-    """Resume key: restore the last workspace and show 'where was I'."""
+    """Resume key: restore workspace, jump back to the anchored line, show 'where was I'."""
     result = _handle_restore()
+
+    def _anchor_later():
+        time.sleep(2.5)                    # let windows come back first
+        try:
+            _handle_anchor_restore()
+        except Exception as e:
+            log.debug("[RESUME] anchor restore: %s", e)
+    threading.Thread(target=_anchor_later, daemon=True, name="ResumeAnchor").start()
     _handle_triage_show("focus")
     return result.replace("RESTORE", "RESUME", 1)
 
@@ -458,6 +476,26 @@ def _handle_hub() -> str:
     except Exception:
         pass
     return _handle_triage_show("inbox" if waiting else "focus").replace("TRIAGE_SHOW", "HUB", 1)
+
+
+def _handle_dial(arg: str) -> str:
+    """Context-aware dial: steps the debugger during a debug session, else time travel."""
+    try:
+        tick = int(arg)
+    except ValueError:
+        return "ERROR DIAL bad tick"
+    try:
+        from deepworkai.features import debug_surface
+        debugging = debug_surface._active
+    except Exception:
+        debugging = False
+    if debugging and tick:
+        from deepworkai.features.debug_surface import execute_debug_action
+        action = "Step Over" if tick > 0 else "Step Out"
+        for _ in range(min(abs(tick), 5)):
+            execute_debug_action(action)
+        return f"OK DIAL debug {action}"
+    return "OK DIAL travel"
 
 
 def _handle_workflow_status() -> str:
@@ -537,6 +575,8 @@ def handle_command(raw: str) -> str:
         if command == "NOTIF_ADD":        return _handle_notif_add(arg)
         # Status
         if command == "RESUME":           return _handle_resume()
+        if command == "SAVE_SPOT":        return _handle_save_spot()
+        if command == "DIAL":             return _handle_dial(arg)
         if command == "HUB":              return _handle_hub()
         if command == "WORKFLOW_STATUS":  return _handle_workflow_status()
         if command == "WHERE_WAS_I":      return _handle_where_was_i()
@@ -611,6 +651,16 @@ def main():
         log.info("[INTEL] recorder + workflow engine running")
     except Exception as e:
         log.error("[INTEL] failed to start: %s", e)
+
+    # Blocker Radar, Git Pulse, Debug watcher, palette — run here so they work
+    # no matter how the service was started (plugin auto-spawn or start.py).
+    for mod, fn in (("blocker_radar", "start_radar"), ("git_pulse", "start_git_pulse"),
+                    ("debug_surface", "start_debug_watcher"), ("terminal_palette", "load_palette")):
+        try:
+            getattr(__import__(f"deepworkai.features.{mod}", fromlist=[fn]), fn)()
+            log.info("[START] %s ready", mod)
+        except Exception as e:
+            log.warning("[START] %s unavailable: %s", mod, e)
 
     # LCD state initial write
     try:
