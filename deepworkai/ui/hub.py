@@ -127,8 +127,18 @@ class Data:
         try:
             from deepworkai.features.cognitive_rewind import build_rewind_context
             c = build_rewind_context(minutes=30)
+            g = c.get("git") or {}
+            # Only files actually edited in the last 30 minutes, not every old uncommitted change.
+            cutoff = time.time() - 30 * 60
+            recent = []
+            for f in g.get("changed_files", []):
+                try:
+                    if (Path(g.get("path", "")) / f).stat().st_mtime > cutoff:
+                        recent.append(f)
+                except OSError:
+                    pass
             return {"last_ide_file": c.get("last_ide_file") or "",
-                    "changed_files": (c.get("git") or {}).get("changed_files", [])[:4],
+                    "changed_files": recent[:4],
                     "browser_tabs": c.get("browser_tabs", [])[:3]}
         except Exception:
             return {}

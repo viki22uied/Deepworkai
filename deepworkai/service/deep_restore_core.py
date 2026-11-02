@@ -406,7 +406,9 @@ def _read_browser_tabs(browser_exe: str) -> list[dict]:
             continue
         got = _tabs_from_session_file(f)
         if got is None:
-            locked.append(str(f))                       # read it at restore, once the browser closes
+            # The file is an append-only log: its size now marks this moment, so restore
+            # can replay exactly up to here, not whatever was open when the browser closed.
+            locked.append({"file": str(f), "size": f.stat().st_size})
         else:
             tabs += got
     log.info("[CAPTURE] %s: %d open tabs captured, %d locked session(s) deferred",
@@ -462,11 +464,13 @@ def _mozlz4(data: bytes) -> bytes:
     return bytes(out)
 
 
-def _tabs_from_session_file(f) -> list[dict] | None:
-    """Tabs in a session file, or None while the browser holds it locked (Brave does)."""
+def _tabs_from_session_file(f, size: int | None = None) -> list[dict] | None:
+    """Tabs in a session file (up to `size` bytes), or None while the browser holds it locked."""
     from chromium_session import parse_session, strip_secret_params
     try:
         data = Path(f).read_bytes()
+        if size and size <= len(data):
+            data = data[:size]
     except PermissionError:
         return None
     except OSError:
@@ -972,8 +976,9 @@ def restore_workspace(snapshot: dict, label: str = ""):
     for bname, files in snapshot.get("pending_tabs", {}).items():
         if bname in running:
             continue
-        for f in [files] if isinstance(files, str) else files:
-            browsers[bname] = list(browsers.get(bname, [])) + (_tabs_from_session_file(f) or [])
+        for e in [files] if isinstance(files, str) else files:
+            f, size = (e["file"], e.get("size")) if isinstance(e, dict) else (e, None)
+            browsers[bname] = list(browsers.get(bname, [])) + (_tabs_from_session_file(f, size) or [])
 
     log.info("[RESTORE] Starting. %d windows, %d browsers, label=%s",
              len(windows), len(browsers), label)

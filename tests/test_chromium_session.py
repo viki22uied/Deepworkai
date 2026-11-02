@@ -67,15 +67,18 @@ def test_locked_session_is_read_at_restore(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", lambda p: (_ for _ in ()).throw(PermissionError()) if p == f else real(p))
     monkeypatch.setattr(core, "_profile_dirs", lambda b: [tmp_path])
     monkeypatch.setattr(cs, "current_session_file", lambda d: f)
-    assert core._read_browser_tabs("brave.exe") == ([], [str(f)])   # locked → remembered, not lost
+    assert core._read_browser_tabs("brave.exe") == ([], [{"file": str(f), "size": f.stat().st_size}])   # locked → remembered, not lost
 
+    size_then = f.stat().st_size
+    with open(f, "ab") as fh:                                          # opened after Save: not restored
+        fh.write(rec(cs.CMD_SET_TAB_WINDOW, struct.pack("<ii", 1, 11)) + nav(11, 0, "https://later.example/"))
     monkeypatch.setattr(Path, "read_bytes", real)                     # Brave closed → unlocked
     opened = []
     monkeypatch.setattr(core, "launch_browser", lambda b, tabs: opened.append((b, tabs)))
     monkeypatch.setattr(core.psutil, "process_iter", lambda *a, **k: [])
     monkeypatch.setattr(core, "enum_windows", lambda: [])
     monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {})
-    core.restore_workspace({"windows": [], "browsers": {}, "pending_tabs": {"brave.exe": [str(f)]},
+    core.restore_workspace({"windows": [], "browsers": {}, "pending_tabs": {"brave.exe": [{"file": str(f), "size": size_then}]},
                             "tabs_format": core.TABS_FORMAT})
     assert opened == [("brave.exe", [{"url": "https://github.com/me/repo", "title": "https://github.com/me/repo"}])]
 
