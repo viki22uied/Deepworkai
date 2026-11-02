@@ -1,5 +1,6 @@
 """Real-data plumbing: which project/file you're in."""
 import json
+from pathlib import Path
 
 from deepworkai.service import ide_context as ic
 
@@ -26,5 +27,5 @@ def test_active_workspace_matches_title(tmp_path, monkeypatch):
         "openedWindows": [{"folder": b.as_uri()}]}}))
     monkeypatch.setattr(ic, "_storage_files", lambda: [store])
     ic._cache["t"] = 0
-    assert ic.active_workspace("x.ts - web - Visual Studio Code") == str(b)
-    assert ic.active_workspace("") == str(a)
+    assert Path(ic.active_workspace("x.ts - web - Visual Studio Code")) == b
+    assert Path(ic.active_workspace("")) == a
