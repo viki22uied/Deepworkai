@@ -80,6 +80,8 @@ def _api(method: str, endpoint: str, **kwargs) -> dict:
     Make a Slack Web API call. Returns parsed JSON or {} on error.
     Always non-blocking — fails silently so the service keeps running.
     """
+    if os.environ.get("DEEPWORKAI_OFFLINE") == "1":
+        return {}
     if not SLACK_TOKEN:
         return {}
     try:
