@@ -79,9 +79,11 @@ _VALID_COMMANDS = {
     "QUEUE_ADD", "QUEUE_LIST", "QUEUE_CLEAR",
     "COGNITIVE_REWIND",
     "STATUS", "PING", "OPEN_TRASH",
+    "WORKFLOW_STATUS", "WHERE_WAS_I", "INSIGHTS",
+    "AUTO_CAPTURE_ON", "AUTO_CAPTURE_OFF", "RELEASE_HELD",
 }
 _VALID_PREFIX_COMMANDS = {
-    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD",
+    "REWIND", "JOURNAL_SAVE", "QUEUE_NOTE", "NOTIF_ADD", "NOTIF_FEEDBACK",
     "PALETTE", "DEBUG_ACTION", "HAPTIC_PULSE",
 }
 
@@ -423,7 +425,45 @@ def _handle_status() -> str:
         "meeting":          meeting,
         "lcd":              lcd,
     }
+    try:
+        payload["workflow"] = _intel().current_state().to_dict()
+    except Exception:
+        pass
     return "OK STATUS " + json.dumps(payload)
+
+
+# Workflow intelligence (local AI)
+def _intel():
+    from deepworkai.features import workflow_intelligence as wi
+    return wi
+
+
+def _handle_workflow_status() -> str:
+    wi = _intel()
+    return "OK WORKFLOW " + json.dumps(wi.current_state().to_dict())
+
+
+def _handle_where_was_i() -> str:
+    ctx = _intel().last_auto_context()
+    if not ctx:
+        return "OK WHERE_WAS_I nothing captured yet"
+    return f"OK WHERE_WAS_I {ctx['summary']} | {ctx.get('anchor', '')}"
+
+
+def _handle_insights() -> str:
+    return "OK INSIGHTS " + json.dumps(_intel().insights())
+
+
+def _handle_release_held() -> str:
+    items = _intel().release_held(include_batched=True)
+    return f"OK RELEASE_HELD {len(items)}"
+
+
+def _handle_notif_feedback(arg: str) -> str:
+    # NOTIF_FEEDBACK:<sender>|opened  or  <sender>|ignored
+    sender, _, verdict = arg.partition("|")
+    _intel().record_feedback(sender.strip(), verdict.strip().lower() == "opened")
+    return "OK NOTIF_FEEDBACK"
 
 
 # ── Main dispatch ──────────────────────────────────────────────────────────────
@@ -474,6 +514,13 @@ def handle_command(raw: str) -> str:
         # Notif
         if command == "NOTIF_ADD":        return _handle_notif_add(arg)
         # Status
+        if command == "WORKFLOW_STATUS":  return _handle_workflow_status()
+        if command == "WHERE_WAS_I":      return _handle_where_was_i()
+        if command == "INSIGHTS":         return _handle_insights()
+        if command == "RELEASE_HELD":     return _handle_release_held()
+        if command == "AUTO_CAPTURE_ON":  _intel().set_auto_capture(True);  return "OK AUTO_CAPTURE on"
+        if command == "AUTO_CAPTURE_OFF": _intel().set_auto_capture(False); return "OK AUTO_CAPTURE off"
+        if command == "NOTIF_FEEDBACK":   return _handle_notif_feedback(arg)
         if command == "STATUS":           return _handle_status()
         if command == "PING":             return "OK PONG"
         if command == "OPEN_TRASH":
@@ -530,6 +577,16 @@ def main():
         except Exception as e:
             log.debug("[CLASSIFIER] Warm-up: %s", e)
     threading.Thread(target=_warm, daemon=True, name="ClassifierWarmup").start()
+
+    # Activity recorder + workflow intelligence (all local, no network)
+    try:
+        from deepworkai.activity.recorder import record_loop
+        threading.Thread(target=record_loop, daemon=True, name="ActivityRecorder").start()
+        from deepworkai.features import workflow_intelligence as wi
+        wi.start()
+        log.info("[INTEL] recorder + workflow engine running")
+    except Exception as e:
+        log.error("[INTEL] failed to start: %s", e)
 
     # LCD state initial write
     try:

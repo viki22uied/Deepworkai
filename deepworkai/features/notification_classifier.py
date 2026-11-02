@@ -444,6 +444,15 @@ def inject_notification(source: str, title: str, body: str, url: str = "",
         held=held,
     )
     classify_notification(n)
+    # Context-aware interruption management: hold/batch unless it is worth
+    # breaking the user's current focus for.
+    try:
+        from deepworkai.features.workflow_intelligence import route_notification, DELIVER
+        decision = route_notification(n.to_dict(), shield_active=held)
+        n.held = held or decision != DELIVER
+        log.info("[CLASSIFIER] routing → %s", decision)
+    except Exception as e:
+        log.debug("[CLASSIFIER] routing unavailable: %s", e)
     save_notification(n)
     log.info("[CLASSIFIER] %s [%s %.0f%%] from %s: %s",
              n.source, n.priority, n.confidence * 100, n.sender or "?", n.title[:60])

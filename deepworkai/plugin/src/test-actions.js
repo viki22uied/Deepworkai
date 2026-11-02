@@ -13,16 +13,20 @@
 import { CommandAction } from '@logitech/plugin-sdk';
 import { ensureService, sendCommand, log } from './tcp-client.js';
 
-async function exec(name, cmd) {
-  await ensureService();
-  try {
-    const r = await sendCommand(cmd);
-    log(`[ACTION] ${name} → ${r}`);
-    return r;
-  } catch (e) {
-    log(`[ACTION] ${name} FAILED: ${e.message}`);
-    return null;
-  }
+// Fire-and-forget: the SDK awaits onKeyDown() before replying to Logi Options+.
+// Blocking here for service spawn (3.5s) + slow commands makes Options+ time the
+// request out, so the button appears to do nothing. Return immediately instead.
+function exec(name, cmd) {
+  log(`[ACTION] ${name} pressed`);
+  (async () => {
+    try {
+      await ensureService();
+      const r = await sendCommand(cmd);
+      log(`[ACTION] ${name} → ${r}`);
+    } catch (e) {
+      log(`[ACTION] ${name} FAILED: ${e.message}`);
+    }
+  })();
 }
 
 // ── 1. Capture Workspace ──────────────────────────────────────────────────────
@@ -31,7 +35,7 @@ export class CaptureAction extends CommandAction {
   displayName = 'Capture Workspace';
   description = 'Snapshot all windows, tabs, git branch and cursor context';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Capture', 'CAPTURE'); }
+  onKeyDown() { exec('Capture', 'CAPTURE'); }
 }
 
 // ── 2. Restore Workspace ──────────────────────────────────────────────────────
@@ -40,7 +44,7 @@ export class RestoreAction extends CommandAction {
   displayName = 'Restore Workspace';
   description = 'Restore the last captured workspace snapshot';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Restore', 'RESTORE'); }
+  onKeyDown() { exec('Restore', 'RESTORE'); }
 }
 
 // ── 3. Focus Shield ───────────────────────────────────────────────────────────
@@ -49,7 +53,7 @@ export class FocusShieldAction extends CommandAction {
   displayName = 'Focus Shield';
   description = 'Toggle deep focus: kills distractions, starts timer, holds notifications';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Shield', 'SHIELD_TOGGLE'); }
+  onKeyDown() { exec('Shield', 'SHIELD_TOGGLE'); }
 }
 
 // ── 4. Meeting Mode ───────────────────────────────────────────────────────────
@@ -58,7 +62,7 @@ export class MeetingModeAction extends CommandAction {
   displayName = 'Meeting Mode';
   description = 'Toggle: saves workspace + DND before meeting, restores after';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Meeting', 'MEETING_TOGGLE'); }
+  onKeyDown() { exec('Meeting', 'MEETING_TOGGLE'); }
 }
 
 // ── 5. Triage Dashboard ───────────────────────────────────────────────────────
@@ -67,7 +71,7 @@ export class TriageAction extends CommandAction {
   displayName = 'Triage Dashboard';
   description = 'Open notification Holding Tank — HIGH/MEDIUM/LOW priority view';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Triage', 'TRIAGE_SHOW'); }
+  onKeyDown() { exec('Triage', 'TRIAGE_SHOW'); }
 }
 
 // ── 6. Journal — Next Step ────────────────────────────────────────────────────
@@ -76,7 +80,7 @@ export class JournalCaptureAction extends CommandAction {
   displayName = 'Journal — Next Step';
   description = 'Open micro-journal overlay — type one line, Enter saves, Esc cancels';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Journal', 'JOURNAL_CAPTURE'); }
+  onKeyDown() { exec('Journal', 'JOURNAL_CAPTURE'); }
 }
 
 // ── 7. Queue Interruption ─────────────────────────────────────────────────────
@@ -85,7 +89,7 @@ export class QueueAction extends CommandAction {
   displayName = 'Queue Interruption';
   description = 'Log this interruption for later — live count shown on LCD';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Queue', 'QUEUE_ADD'); }
+  onKeyDown() { exec('Queue', 'QUEUE_ADD'); }
 }
 
 // ── 8. Context Rewind ─────────────────────────────────────────────────────────
@@ -94,5 +98,5 @@ export class CognitiveRewindAction extends CommandAction {
   displayName = 'Context Rewind';
   description = 'See what you were doing: git branch, open files, last note';
   groupName   = 'Deep Work AI';
-  async onKeyDown() { await exec('Rewind', 'COGNITIVE_REWIND'); }
+  onKeyDown() { exec('Rewind', 'COGNITIVE_REWIND'); }
 }

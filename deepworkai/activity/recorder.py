@@ -83,6 +83,16 @@ def setup_db():
 
 def save_event(event_type: str, description: str,
                app: str = "", details: dict | None = None):
+    # Privacy: scrub emails/tokens/query strings before anything hits disk.
+    try:
+        from deepworkai.features.workflow_intelligence import redact, PRIVATE_MODE
+        description = redact(description)
+        if details:
+            details = {k: (redact(v) if isinstance(v, str) else v) for k, v in details.items()}
+            if PRIVATE_MODE:
+                details.pop("title", None)
+    except Exception:
+        pass
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.execute(
@@ -97,7 +107,33 @@ def save_event(event_type: str, description: str,
         log.error("DB write error: %s", e)
 
 
+def _foreground_window() -> dict | None:
+    """The window the user is actually looking at (not the highest-CPU one)."""
+    try:
+        import ctypes
+        import psutil
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        length = user32.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        name = psutil.Process(pid.value).name().lower()
+        return {"name": name, "title": buf.value}
+    except Exception:
+        return None
+
+
 def get_active_window() -> dict | None:
+    fg = _foreground_window()
+    if fg is not None:
+        label = DEVELOPER_APPS.get(fg["name"])
+        if not label:
+            return None
+        return {"name": fg["name"], "label": label, "title": fg["title"]}
     try:
         ps = (
             "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} "
@@ -162,15 +198,16 @@ def get_open_browser_tabs() -> list[str]:
         return []
 
 
-def record_loop():
+def record_loop(stop_event=None):
     setup_db()
     log.info("Activity recorder started. Polling every %ds.", POLL_INTERVAL)
 
     last_app    = None
     last_branch = None
+    last_commit = None
     tab_counter = 0
 
-    while True:
+    while not (stop_event and stop_event.is_set()):
         try:
             # App switch tracking
             window = get_active_window()
@@ -196,6 +233,14 @@ def record_loop():
                         details=git,
                     )
 
+            # Commit tracking — a natural breakpoint for interruption release
+            if git and git.get("last_commit"):
+                if last_commit is not None and git["last_commit"] != last_commit:
+                    save_event("git_commit", f"Git commit: {git['last_commit'][:80]}",
+                               app="Git", details={"repo": git.get("repo"),
+                                                   "branch": git.get("branch")})
+                last_commit = git["last_commit"]
+
             # Browser tab tracking (every TAB_POLL_EVERY cycles)
             tab_counter += 1
             if tab_counter >= TAB_POLL_EVERY:
@@ -212,7 +257,10 @@ def record_loop():
         except Exception as e:
             log.error("Poll error: %s", e)
 
-        time.sleep(POLL_INTERVAL)
+        if stop_event:
+            stop_event.wait(POLL_INTERVAL)
+        else:
+            time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
