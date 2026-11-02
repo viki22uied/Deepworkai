@@ -35,3 +35,8 @@ data/.session_key
 data/*.bin
 data/*.tmp
 .env
+
+# Build output
+/build/
+deepworkai/plugin/dist/
+*.lplug4

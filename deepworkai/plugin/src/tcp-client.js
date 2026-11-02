@@ -141,6 +141,27 @@ export function isServiceAlive() {
   });
 }
 
+// ── Bundled app (marketplace install) ─────────────────────────────────────────
+// The .lplug4 ships the packaged app under assets/app/DeepWorkAI/ (see assets.yml).
+export function bundledAppExe() {
+  const pkg = process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH;
+  const candidates = [
+    pkg && path.join(pkg, 'assets', 'app', 'DeepWorkAI', 'DeepWorkAI.exe'),
+    path.resolve(__dirname, 'assets', 'app', 'DeepWorkAI', 'DeepWorkAI.exe'),   // dist/ layout
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+function appDataDirs() {
+  // Where the service writes data/.session_key: installed app first, then a source checkout.
+  const dirs = [];
+  if (process.env.DEEPWORKAI_DATA) dirs.push(process.env.DEEPWORKAI_DATA);
+  if (process.env.LOCALAPPDATA) dirs.push(path.join(process.env.LOCALAPPDATA, 'DeepWorkAI', 'data'));
+  const root = getProjectRoot();
+  if (root) dirs.push(path.join(root, 'data'));
+  return dirs;
+}
+
 function spawnService() {
   return new Promise((resolve) => {
     if (_serviceSpawning) {
@@ -148,6 +169,27 @@ function spawnService() {
       return;
     }
     _serviceSpawning = true;
+
+    const appExe = bundledAppExe();
+    if (appExe) {                                         // marketplace install: no Python needed
+      log('[SPAWN] Starting bundled Deep Work AI app');
+      try {
+        const child = spawn(appExe, [], {
+          cwd: path.dirname(appExe), detached: true, stdio: 'ignore', windowsHide: true,
+        });
+        child.on('error', (err) => log(`[SPAWN] Error: ${err.message}`));
+        child.unref();
+      } catch (e) {
+        log(`[SPAWN] Exception: ${e.message}`);
+      }
+      setTimeout(async () => {
+        _serviceSpawning = false;
+        const alive = await isServiceAlive();
+        log(`[SPAWN] Service ${alive ? 'started' : 'not responding yet'}`);
+        resolve(alive);
+      }, SPAWN_WAIT);
+      return;
+    }
 
     const pythonPath = getPythonExecutable();
     const servicePath = getServicePath();
@@ -200,13 +242,16 @@ export async function ensureService() {
 // The service writes a fresh random key to <repo>/data/.session_key on start;
 // every command except PING must be prefixed with "@<key> ".
 function readSessionKey() {
-  const root = getProjectRoot();
-  if (!root) return '';
-  try {
-    return fs.readFileSync(path.join(root, 'data', '.session_key'), 'utf-8').trim();
-  } catch (_) {
-    return '';
+  // Newest key wins (the service rewrites it on every start).
+  let best = '', bestTime = 0;
+  for (const dir of appDataDirs()) {
+    const f = path.join(dir, '.session_key');
+    try {
+      const t = fs.statSync(f).mtimeMs;
+      if (t > bestTime) { best = fs.readFileSync(f, 'utf-8').trim(); bestTime = t; }
+    } catch (_) { /* not there */ }
   }
+  return best;
 }
 
 // ── Send Command (with retry) ────────────────────────────────────────────────

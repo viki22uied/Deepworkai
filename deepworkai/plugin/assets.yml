@@ -1,0 +1,4 @@
+# Extra files packed into the .lplug4 (copied to dist/assets/<name>/ by the Logitech toolkit).
+# The packaged Deep Work AI app is produced by packaging/build-windows.ps1 (or the release workflow).
+- name: app
+  path: ../../build/app/DeepWorkAI

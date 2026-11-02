@@ -295,11 +295,15 @@ def _ui_ensure():
     global _ui_proc
     if _ui_proc and _ui_proc.poll() is None:
         return
-    pythonw = Path(sys.executable).parent / "pythonw.exe"
-    interp  = str(pythonw) if pythonw.exists() else sys.executable
+    if getattr(sys, "frozen", False):          # packaged app: the same exe runs the Hub
+        cmd = [sys.executable, "--hub", "--background"]
+    else:
+        pythonw = Path(sys.executable).parent / "pythonw.exe"
+        interp  = str(pythonw) if pythonw.exists() else sys.executable
+        cmd = [interp, "-m", "deepworkai.ui.hub", "--background"]
     try:
         _ui_proc = subprocess.Popen(
-            [interp, "-m", "deepworkai.ui.hub", "--background"], cwd=str(PROJECT_ROOT),
+            cmd, cwd=str(PROJECT_ROOT if not getattr(sys, "frozen", False) else Path(sys.executable).parent),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
@@ -775,13 +779,14 @@ def _lock_data_dir():
     except Exception as e:
         log.warning("[SECURITY] could not restrict data folder: %s", e)
     try:
-        from secrets_store import plaintext_secrets_in_env
-        leaked = plaintext_secrets_in_env()
-        if leaked:
-            log.warning("[SECURITY] %s stored in plain text in .env — run: "
-                        "python -m deepworkai.service.secrets_store import-env", ", ".join(leaked))
-    except Exception:
-        pass
+        from secrets_store import available, import_env, plaintext_secrets_in_env
+        if available() and plaintext_secrets_in_env():
+            moved = import_env()                     # encrypt automatically, blank them in .env
+            log.info("[SECURITY] moved %d token(s) from .env into the encrypted vault", len(moved))
+        elif plaintext_secrets_in_env():
+            log.warning("[SECURITY] tokens stored in plain text in .env (encrypted vault needs Windows)")
+    except Exception as e:
+        log.warning("[SECURITY] token import failed: %s", e.__class__.__name__)
 
 
 def _init_session_key():

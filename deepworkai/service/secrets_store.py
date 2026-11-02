@@ -22,9 +22,9 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-VAULT = ROOT / "data" / "secrets.bin"
-ENV_FILE = ROOT / ".env"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from deepworkai.service.paths import DATA_DIR, ENV_FILE  # noqa: E402
+VAULT = DATA_DIR / "secrets.bin"
 SECRET_KEYS = ("SLACK_TOKEN", "GITHUB_TOKEN", "JIRA_TOKEN")          # moved into the vault
 _ENTROPY = b"DeepWorkAI.v1"
 _cache: dict | None = None

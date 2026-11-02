@@ -38,7 +38,7 @@ from deepworkai.ui import hub
 from deepworkai.ui.hub import (ACTIVITY, SYS, T, Badge, HatchCard, Icon, big, capsule, card, clear, font,
                                 label, overline, _q)
 
-DATA = ROOT / "data"
+from deepworkai.service.paths import DATA_DIR as DATA  # noqa: E402
 STATE = DATA / "timetravel.json"
 COMMIT_MS = 2500
 VISIBLE = 7                       # rows shown on the rail around the selection

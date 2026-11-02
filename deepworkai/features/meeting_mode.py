@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).parent.parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-DATA_DIR   = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = DATA_DIR / "meeting_state.json"
 

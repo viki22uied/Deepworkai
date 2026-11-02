@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 BASE_DIR     = Path(__file__).parent.parent.parent
-DATA_DIR     = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 JOURNAL_PATH = DATA_DIR / "next_step.txt"
 

@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-DATA = ROOT / "data"
+from deepworkai.service.paths import DATA_DIR as DATA  # noqa: E402
 
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPoint, QPointF
 from PyQt6.QtGui import (QBrush, QColor, QConicalGradient, QFont, QGuiApplication, QImage,

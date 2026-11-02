@@ -41,7 +41,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(exist_ok=True)
 ACTIVITY_DB = DATA_DIR / "activity.db"
 INTEL_DB    = DATA_DIR / "intelligence.db"

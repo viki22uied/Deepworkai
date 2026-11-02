@@ -77,11 +77,37 @@ These are not required — the system degrades gracefully without them:
 
 ## Installation
 
+### For users (Logitech Marketplace)
+
+1. In **Logi Options+**, open the Marketplace and install **Deep Work AI**.
+2. Put **Focus**, **Resume**, **Inbox** and **Time Travel** on your MX Creative Console.
+3. Press any key. The Deep Work AI app is bundled inside the plugin and starts automatically —
+   no Python, no installer, nothing else to download.
+
+Your data is kept in `%LOCALAPPDATA%\DeepWorkAI\data` and survives plugin updates.
+Optional Slack/GitHub/Jira: put your tokens in `%LOCALAPPDATA%\DeepWorkAI\.env` (same format as
+`.env.example`). On its next start the app moves them into its encrypted vault and blanks them in the file.
+
+### Building the marketplace package
+
+The `.lplug4` is built on Windows, with the app frozen by PyInstaller and bundled inside it:
+
+```powershell
+.\packaging\build-windows.ps1
+```
+
+This installs dependencies, builds `DeepWorkAI.exe`, smoke-tests it (service answers, authentication
+works, core commands succeed) and packs `deepworkai/plugin/DeepWorkAi.lplug4`. The same steps run on
+GitHub Actions (`.github/workflows/release.yml`) for every `v*` tag, and the `.lplug4` is attached to
+the GitHub release.
+
+### For developers (from source)
+
 ### Step 1 — Clone the Repository
 
 ```bash
-git clone https://github.com/viki22uied/Deep.git
-cd Deep
+git clone https://github.com/viki22uied/Deepworkai.git
+cd Deepworkai
 ```
 
 ### Step 2 — Install Python Dependencies
