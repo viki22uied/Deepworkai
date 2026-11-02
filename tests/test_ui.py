@@ -111,3 +111,32 @@ def test_note_is_saved_from_hub(hub_env):
     fp = w.pages["focus"]
     fp.note.setPlainText("ship the fix"); fp._save_note()
     assert (data / "next_step.txt").read_text() == "ship the fix"
+
+
+def test_no_widget_leak_across_rerenders(hub_env):
+    """Re-rendering pages hundreds of times must not grow memory (widgets are freed)."""
+    from PyQt6.QtCore import QCoreApplication, QEvent
+    hub, _, data = hub_env
+    _notifications(data / "notifications.db", 30)
+    w = hub.Hub("focus", persistent=True)
+
+    def cycle():
+        for t in ("focus", "timeline", "inbox", "insights"):
+            w.present(t)
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
+            QApplication.processEvents()
+
+    for _ in range(5):
+        cycle()
+    base = len(QApplication.allWidgets())
+    for _ in range(50):
+        cycle()
+    assert len(QApplication.allWidgets()) <= base + 5
+
+
+def test_classifier_needs_no_heavy_ml_libs():
+    import sys
+    from deepworkai.features import notification_classifier as nc
+    nc._build_model()
+    assert nc.classify("production is down, 500 errors everywhere")[0] == "HIGH"
+    assert "sklearn" not in sys.modules and "numpy" not in sys.modules

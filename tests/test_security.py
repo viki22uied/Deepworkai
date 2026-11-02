@@ -93,3 +93,45 @@ def test_redaction_scrubs_secrets():
                "https://x.io/cb?code=SECRET AKIAABCDEFGHIJKLMNOP 4111111111111111")
     for leak in ("bob@corp.com", "xoxb-", "hunter2", "SECRET", "AKIA", "4111111111111111"):
         assert leak not in s
+
+
+# ── Secrets & data at rest ────────────────────────────────────────────────────
+def test_secret_url_params_are_stripped():
+    from deepworkai.service.chromium_session import strip_secret_params as s
+    assert s("https://app.io/reset?token=abc&lang=en") == "https://app.io/reset?lang=en"
+    assert s("https://app.io/cb?code=XYZ&state=123") == "https://app.io/cb"
+    assert s("https://s3.aws.com/f?X-Amz-Signature=1&X-Amz-Credential=2") == "https://s3.aws.com/f"
+    assert s("https://app.io/#access_token=SECRET") == "https://app.io/"
+    assert s("https://github.com/acme/api/pull/1?tab=files") == "https://github.com/acme/api/pull/1?tab=files"
+
+
+def test_vault_lookup_order(tmp_path, monkeypatch):
+    from deepworkai.service import secrets_store as ss
+    env = tmp_path / ".env"
+    env.write_text("SLACK_TOKEN=xoxb-plain\nGITHUB_REPO=acme/api\n")
+    monkeypatch.setattr(ss, "ENV_FILE", env)
+    monkeypatch.setattr(ss, "_cache", {"GITHUB_TOKEN": "ghp_vault"})
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert ss.get("GITHUB_TOKEN") == "ghp_vault"
+    assert ss.get("GITHUB_REPO") == "acme/api"
+    assert ss.plaintext_secrets_in_env() == ["SLACK_TOKEN"]
+    monkeypatch.setenv("GITHUB_TOKEN", "from_env")
+    assert ss.get("GITHUB_TOKEN") == "from_env"
+
+
+def test_logs_never_contain_message_content(svc, server, tmp_path):
+    import logging
+    from deepworkai.features import notification_classifier as nc
+    records = []
+    h = logging.Handler(); h.emit = records.append
+    logging.getLogger().addHandler(h)
+    try:
+        nc.DB_PATH = tmp_path / "n.db"
+        nc.inject_notification("slack", "salary review for jane doe", "confidential", sender="hr-bot")
+        send_ = __import__("conftest").send
+        send_(server, f"@{svc._SESSION_KEY} JOURNAL_SAVE:my private note")
+    finally:
+        logging.getLogger().removeHandler(h)
+    text = " ".join(r.getMessage() for r in records)
+    for leak in ("salary", "jane", "hr-bot", "private note"):
+        assert leak not in text
