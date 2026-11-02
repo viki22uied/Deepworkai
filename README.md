@@ -632,6 +632,21 @@ deepworkai/
 
 ---
 
+## The Rule of Three (keypad layout)
+
+Three keys and the dial do everything. Press once, twice or three times quickly:
+
+| Key | 1 press | 2 presses | 3 presses |
+|---|---|---|---|
+| **Focus** | Focus Shield on/off (saves your workspace first) | Meeting mode on/off | — |
+| **Resume** | Restore workspace + show "where was I" | Write a next-step note | — |
+| **Inbox** | Open the Hub (Inbox if something is waiting, otherwise Focus) | Queue this interruption | Release everything held |
+| **Dial** | Turn to travel back in time; stop turning to restore | | |
+
+There is no Capture key: context is saved automatically when you start focusing and when an interruption pulls you out of deep focus.
+
+---
+
 ## Privacy, Offline Mode & the Hub
 
 **Everything runs on your PC.** There is no Deep Work AI server, account, or telemetry — nothing is ever sent to us.
