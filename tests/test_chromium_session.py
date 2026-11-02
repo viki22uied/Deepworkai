@@ -55,3 +55,46 @@ def test_ignores_recently_closed_file(tmp_path):
     (s / "Tabs_999").write_bytes(build(nav(1, 0, "https://stale.example/")))
     (s / "Session_1").write_bytes(build(nav(1, 0, "https://live.example/")))
     assert cs.read_open_tabs(tmp_path) == ["https://live.example/"]
+
+
+def test_locked_session_is_read_at_restore(tmp_path, monkeypatch):
+    """Brave locks its live session file: capture defers it, restore reads it once Brave is closed."""
+    import deep_restore_core as core
+    f = tmp_path / "Session_1"
+    f.write_bytes(build(rec(cs.CMD_SET_TAB_WINDOW, struct.pack("<ii", 1, 10)),
+                        nav(10, 0, "https://github.com/me/repo")))
+    real = Path.read_bytes
+    monkeypatch.setattr(Path, "read_bytes", lambda p: (_ for _ in ()).throw(PermissionError()) if p == f else real(p))
+    monkeypatch.setattr(core, "_profile_dirs", lambda b: [tmp_path])
+    monkeypatch.setattr(cs, "current_session_file", lambda d: f)
+    assert core._read_browser_tabs("brave.exe") == ([], [str(f)])   # locked → remembered, not lost
+
+    monkeypatch.setattr(Path, "read_bytes", real)                     # Brave closed → unlocked
+    opened = []
+    monkeypatch.setattr(core, "launch_browser", lambda b, tabs: opened.append((b, tabs)))
+    monkeypatch.setattr(core.psutil, "process_iter", lambda *a, **k: [])
+    monkeypatch.setattr(core, "enum_windows", lambda: [])
+    monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {})
+    core.restore_workspace({"windows": [], "browsers": {}, "pending_tabs": {"brave.exe": [str(f)]},
+                            "tabs_format": core.TABS_FORMAT})
+    assert opened == [("brave.exe", [{"url": "https://github.com/me/repo", "title": "https://github.com/me/repo"}])]
+
+
+def test_restore_never_relaunches_itself():
+    import deep_restore_core as core
+    assert core._should_skip("DeepWorkAI.exe") and core._should_skip_relaunch("deepworkai.exe")
+
+
+def test_firefox_session_decoded(tmp_path, monkeypatch):
+    import json as _json
+    import deep_restore_core as core
+    magic = b"mozLz40\0" + bytes(4)
+    assert core._mozlz4(magic + bytes([0x32]) + b"abc" + bytes([3, 0, 0])) == b"abcabcabc"
+    state = _json.dumps({"windows": [{"tabs": [
+        {"index": 2, "entries": [{"url": "https://old.example/"}, {"url": "https://github.com/me"}]},
+        {"index": 1, "entries": [{"url": "about:newtab"}]}]}]}).encode()
+    raw = bytes([0xF0]) + bytes([255] * ((len(state) - 15) // 255)) + bytes([(len(state) - 15) % 255]) + state
+    f = tmp_path / "p" / "sessionstore-backups" / "recovery.jsonlz4"
+    f.parent.mkdir(parents=True); f.write_bytes(magic + raw)
+    monkeypatch.setitem(core._BROWSER_SESSION_PATHS, "firefox.exe", tmp_path)
+    assert core._firefox_tabs() == [{"url": "https://github.com/me", "title": "https://github.com/me"}]

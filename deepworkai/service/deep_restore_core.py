@@ -125,7 +125,8 @@ def _is_logitech(proc_name: str) -> bool:
 
 def _should_skip(proc_name: str) -> bool:
     n = proc_name.lower()
-    return _is_system_process(n) or _is_logitech(n)
+    # Never capture or relaunch ourselves: a second DeepWorkAI.exe steals the port and key.
+    return _is_system_process(n) or _is_logitech(n) or n == "deepworkai.exe"
 
 def _should_skip_relaunch(proc_name: str) -> bool:
     """True for processes we capture for context but never blindly relaunch."""
@@ -342,14 +343,27 @@ def find_exe(process_name: str, saved_path: str = "") -> str:
 
 
 # ── Browser Tab Capture ───────────────────────────────────────────────────────
+_LOCAL = Path(os.environ.get("LOCALAPPDATA", ""))
+_ROAMING = Path(os.environ.get("APPDATA", ""))
+# Where each browser keeps its profiles. Chromium family: every "User Data/<profile>" with a
+# Sessions folder. Opera keeps one profile in the folder itself. Firefox: see _firefox_tabs.
 _BROWSER_SESSION_PATHS = {
-    "brave.exe":  Path(os.environ.get("LOCALAPPDATA", "")) /
-                  "BraveSoftware/Brave-Browser/User Data/Default",
-    "chrome.exe": Path(os.environ.get("LOCALAPPDATA", "")) /
-                  "Google/Chrome/User Data/Default",
-    "msedge.exe": Path(os.environ.get("LOCALAPPDATA", "")) /
-                  "Microsoft/Edge/User Data/Default",
+    "brave.exe":   _LOCAL / "BraveSoftware/Brave-Browser/User Data",
+    "chrome.exe":  _LOCAL / "Google/Chrome/User Data",
+    "msedge.exe":  _LOCAL / "Microsoft/Edge/User Data",
+    "vivaldi.exe": _LOCAL / "Vivaldi/User Data",
+    "opera.exe":   _ROAMING / "Opera Software/Opera Stable",
+    "firefox.exe": _ROAMING / "Mozilla/Firefox/Profiles",
 }
+
+
+def _profile_dirs(browser_exe: str) -> list[Path]:
+    base = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
+    if not base or not base.exists():
+        return []
+    if (base / "Sessions").exists() or (base / "Current Session").exists():
+        return [base]
+    return [d for d in base.iterdir() if (d / "Sessions").exists()]
 
 # Only capture & restore tabs that are developer-relevant.
 # Everything else (YouTube, social, shopping) is noise that slows restore.
@@ -370,7 +384,7 @@ _DEV_URL_PATTERNS = [
 TABS_FORMAT = 2
 
 # Max tabs to capture per browser — prevents tab floods on restore
-_MAX_TABS_PER_BROWSER = 20
+_MAX_TABS_PER_BROWSER = 50
 
 
 def _read_browser_tabs(browser_exe: str) -> list[dict]:
@@ -380,12 +394,84 @@ def _read_browser_tabs(browser_exe: str) -> list[dict]:
     code scraped every URL out of Sessions/Tabs_* — Chromium's *recently
     closed* list — which restored tabs closed days or months ago.
     """
-    from chromium_session import read_open_tabs, strip_secret_params
-    session_dir = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
-    if not session_dir:
+    from chromium_session import current_session_file
+    if browser_exe.lower() == "firefox.exe":
+        tabs = _firefox_tabs()
+        log.info("[CAPTURE] %s: %d open tabs captured", browser_exe, len(tabs))
+        return tabs, []
+    tabs, locked = [], []
+    for profile in _profile_dirs(browser_exe):         # every profile, not just Default
+        f = current_session_file(profile)
+        if not f:
+            continue
+        got = _tabs_from_session_file(f)
+        if got is None:
+            locked.append(str(f))                       # read it at restore, once the browser closes
+        else:
+            tabs += got
+    log.info("[CAPTURE] %s: %d open tabs captured, %d locked session(s) deferred",
+             browser_exe, len(tabs), len(locked))
+    return tabs[:_MAX_TABS_PER_BROWSER], locked
+
+
+def _firefox_tabs() -> list[dict]:
+    """Open tabs from Firefox's live session (sessionstore-backups/recovery.jsonlz4, never locked)."""
+    from chromium_session import strip_secret_params
+    base = _BROWSER_SESSION_PATHS["firefox.exe"]
+    files = list(base.glob("*/sessionstore-backups/recovery.jsonlz4")) if base.exists() else []
+    if not files:
         return []
-    urls = [strip_secret_params(u) for u in read_open_tabs(session_dir)[:_MAX_TABS_PER_BROWSER]]
-    log.info("[CAPTURE] %s: %d open tabs captured", browser_exe, len(urls))
+    try:
+        state = json.loads(_mozlz4(max(files, key=lambda f: f.stat().st_mtime).read_bytes()))
+    except (OSError, ValueError):
+        return []
+    urls = []
+    for w in state.get("windows", []):
+        for t in w.get("tabs", []):
+            entries = t.get("entries") or []
+            if entries:
+                u = entries[min(max(t.get("index", len(entries)), 1), len(entries)) - 1].get("url", "")
+                if u.startswith(("http://", "https://")):
+                    urls.append(strip_secret_params(u))
+    return [{"url": u, "title": u} for u in urls[:_MAX_TABS_PER_BROWSER]]
+
+
+def _mozlz4(data: bytes) -> bytes:
+    """Decode Firefox's mozLz4 file: 8-byte magic, 4-byte size, then one raw LZ4 block."""
+    if data[:8] != b"mozLz40\0":
+        raise ValueError("not mozlz4")
+    src, out, i = data[12:], bytearray(), 0
+    while i < len(src):
+        tok = src[i]; i += 1
+        n = tok >> 4
+        if n == 15:
+            while src[i] == 255:
+                n += 255; i += 1
+            n += src[i]; i += 1
+        out += src[i:i + n]; i += n
+        if i >= len(src):
+            break
+        off = src[i] | src[i + 1] << 8; i += 2
+        m = tok & 15
+        if m == 15:
+            while src[i] == 255:
+                m += 255; i += 1
+            m += src[i]; i += 1
+        for _ in range(m + 4):                          # byte by byte: matches may overlap
+            out.append(out[-off])
+    return bytes(out)
+
+
+def _tabs_from_session_file(f) -> list[dict] | None:
+    """Tabs in a session file, or None while the browser holds it locked (Brave does)."""
+    from chromium_session import parse_session, strip_secret_params
+    try:
+        data = Path(f).read_bytes()
+    except PermissionError:
+        return None
+    except OSError:
+        return []
+    urls = [strip_secret_params(u) for u in parse_session(data)[:_MAX_TABS_PER_BROWSER]]
     return [{"url": u, "title": u} for u in urls]
 
 
@@ -513,10 +599,13 @@ def capture_workspace() -> dict:
     browsers: dict[str, list] = {}
 
     # Capture tabs for every running browser
+    pending: dict[str, str] = {}
     for bname in _detect_active_browsers():
-        tabs = _read_browser_tabs(bname)
+        tabs, locked = _read_browser_tabs(bname)
         if tabs:
             browsers[bname] = tabs
+        if locked:
+            pending[bname] = locked         # locked now; they hold these tabs once the browser closes
 
     vscode = _get_vscode_context()
     git    = _get_git_context(vscode.get("workspace_path", ""))
@@ -535,6 +624,7 @@ def capture_workspace() -> dict:
     return {
         "windows":       windows,
         "browsers":      browsers,
+        "pending_tabs":  pending,
         "vscode":        vscode,
         "git":           git,
         "terminal_cwds": terminal_cwds,
@@ -655,11 +745,8 @@ def get_recent_snapshots(limit: int = 10) -> list[dict]:
 # ── App Launch ────────────────────────────────────────────────────────────────
 def _get_currently_open_urls(browser_exe: str) -> set:
     """URLs open in the live browser session — used to avoid duplicate tabs."""
-    from chromium_session import read_open_tabs
-    session_dir = _BROWSER_SESSION_PATHS.get(browser_exe.lower())
-    if not session_dir:
-        return set()
-    return {u.split("#")[0].rstrip("/") for u in read_open_tabs(session_dir)}
+    tabs, _locked = _read_browser_tabs(browser_exe)
+    return {t["url"].split("#")[0].rstrip("/") for t in tabs}
 
 
 def launch_browser(browser_exe: str, tabs: list) -> bool:
@@ -717,7 +804,6 @@ def launch_browser(browser_exe: str, tabs: list) -> bool:
                 [exe_path, "--new-window"] + urls_to_open,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            time.sleep(1.5)  # wait for browser to start
             log.info("[RESTORE] Launched %s with %d tabs", browser_exe, len(urls_to_open))
         return True
     except Exception as e:
@@ -881,6 +967,14 @@ def restore_workspace(snapshot: dict, label: str = ""):
     running = {p.info["name"].lower()
                for p in psutil.process_iter(["name"])}
 
+    # Tabs that were locked at capture: readable now if that browser has since closed.
+    browsers = dict(browsers)
+    for bname, files in snapshot.get("pending_tabs", {}).items():
+        if bname in running:
+            continue
+        for f in [files] if isinstance(files, str) else files:
+            browsers[bname] = list(browsers.get(bname, [])) + (_tabs_from_session_file(f) or [])
+
     log.info("[RESTORE] Starting. %d windows, %d browsers, label=%s",
              len(windows), len(browsers), label)
 
@@ -919,10 +1013,13 @@ def restore_workspace(snapshot: dict, label: str = ""):
 
     # ── Phase 3: Wait for newly launched apps to create their windows ─────────
     # Newly launched apps need a moment; already-running apps need almost none.
-    newly_launched = set(needed_counts.keys()) - set(running_counts.keys())
-    wait_secs = 3.0 if newly_launched else 1.0
-    log.info("[RESTORE] Phase 3: waiting %.1fs for windows to appear...", wait_secs)
-    time.sleep(wait_secs)
+    # Poll instead of a fixed sleep: continue as soon as every new app has a window.
+    newly_launched = (set(needed_counts) | {b for b in browsers if browsers[b]}) - running
+    deadline = time.time() + 3.0
+    while newly_launched and time.time() < deadline:
+        if newly_launched <= set(_snapshot_hwnds()):
+            break
+        time.sleep(0.1)
 
     # ── Phase 4: Reposition — ONE snapshot, no polling ────────────────────────
     # Take a single EnumWindows pass to build a complete map of
