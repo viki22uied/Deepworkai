@@ -23,3 +23,7 @@ data/*.txt
 # Node.js (Logi plugin build)
 node_modules/
 deepworkai/plugin/dist/
+
+# Never commit personal data
+deepworkai/data/
+*.db
