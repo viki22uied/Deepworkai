@@ -30,7 +30,7 @@ log = logging.getLogger("slack_integration")
 # ── Config ────────────────────────────────────────────────────────────────────
 # One data folder for the whole app (<repo>/data) — the UI reads snapshots from here.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH     = DATA_DIR / "capsules.db"
 

@@ -51,14 +51,17 @@ export function log(msg) {
 // plugin is installed via `logitoolkit pack` it lives inside the Logi plugin
 // directory, far from the repo. So never assume a fixed relative layout —
 // search a few candidate locations instead.
+function userConfigDir() {
+  // Per-user settings live outside the plugin folder, which Options+ replaces on every update.
+  if (process.platform === 'win32' && process.env.APPDATA) return path.join(process.env.APPDATA, 'DeepWorkAI');
+  return path.join(process.env.HOME || '', '.config', 'deepworkai');
+}
+
 function getConfig() {
   const candidates = [
-    path.resolve(__dirname, '..', 'config.json'),                  // plugin/config.json (linked/dev)
-    path.resolve(__dirname, 'config.json'),
-    process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH
-      ? path.join(process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH, 'config.json')
-      : null,
-  ].filter(Boolean);
+    path.join(userConfigDir(), 'config.json'),                     // per-user (marketplace installs)
+    path.resolve(__dirname, '..', 'config.json'),                  // plugin/config.json (development)
+  ];
   for (const configFile of candidates) {
     try {
       if (fs.existsSync(configFile)) {
@@ -85,6 +88,10 @@ export function getProjectRoot() {
   if (cfg.service_script && fs.existsSync(cfg.service_script)) {
     return path.resolve(path.dirname(cfg.service_script), '..', '..');
   }
+  // Standard per-user install location of the Deep Work AI app.
+  const standard = process.platform === 'win32' && process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, 'DeepWorkAI') : null;
+  if (standard && fs.existsSync(path.join(standard, SERVICE_REL))) return standard;
   // Walk up from the bundle location (works when the plugin is linked from the repo).
   let dir = __dirname;
   for (let i = 0; i < 6; i++) {
@@ -134,6 +141,27 @@ export function isServiceAlive() {
   });
 }
 
+// ── Bundled app (marketplace install) ─────────────────────────────────────────
+// The .lplug4 ships the packaged app under assets/app/DeepWorkAI/ (see assets.yml).
+export function bundledAppExe() {
+  const pkg = process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH;
+  const candidates = [
+    pkg && path.join(pkg, 'assets', 'app', 'DeepWorkAI', 'DeepWorkAI.exe'),
+    path.resolve(__dirname, 'assets', 'app', 'DeepWorkAI', 'DeepWorkAI.exe'),   // dist/ layout
+  ].filter(Boolean);
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+function appDataDirs() {
+  // Where the service writes data/.session_key: installed app first, then a source checkout.
+  const dirs = [];
+  if (process.env.DEEPWORKAI_DATA) dirs.push(process.env.DEEPWORKAI_DATA);
+  if (process.env.LOCALAPPDATA) dirs.push(path.join(process.env.LOCALAPPDATA, 'DeepWorkAI', 'data'));
+  const root = getProjectRoot();
+  if (root) dirs.push(path.join(root, 'data'));
+  return dirs;
+}
+
 function spawnService() {
   return new Promise((resolve) => {
     if (_serviceSpawning) {
@@ -142,11 +170,32 @@ function spawnService() {
     }
     _serviceSpawning = true;
 
+    const appExe = bundledAppExe();
+    if (appExe) {                                         // marketplace install: no Python needed
+      log('[SPAWN] Starting bundled Deep Work AI app');
+      try {
+        const child = spawn(appExe, [], {
+          cwd: path.dirname(appExe), detached: true, stdio: 'ignore', windowsHide: true,
+        });
+        child.on('error', (err) => log(`[SPAWN] Error: ${err.message}`));
+        child.unref();
+      } catch (e) {
+        log(`[SPAWN] Exception: ${e.message}`);
+      }
+      setTimeout(async () => {
+        _serviceSpawning = false;
+        const alive = await isServiceAlive();
+        log(`[SPAWN] Service ${alive ? 'started' : 'not responding yet'}`);
+        resolve(alive);
+      }, SPAWN_WAIT);
+      return;
+    }
+
     const pythonPath = getPythonExecutable();
     const servicePath = getServicePath();
 
     if (!servicePath || !fs.existsSync(servicePath)) {
-      log(`[SPAWN] ERROR: Service not found (${servicePath}). Set project_root in plugin/config.json or DEEPWORKAI_ROOT.`);
+      log(`[SPAWN] ERROR: Service not found (${servicePath}). Install the Deep Work AI app, or set project_root in %APPDATA%\\DeepWorkAI\\config.json.`);
       _serviceSpawning = false;
       resolve(false);
       return;
@@ -193,13 +242,16 @@ export async function ensureService() {
 // The service writes a fresh random key to <repo>/data/.session_key on start;
 // every command except PING must be prefixed with "@<key> ".
 function readSessionKey() {
-  const root = getProjectRoot();
-  if (!root) return '';
-  try {
-    return fs.readFileSync(path.join(root, 'data', '.session_key'), 'utf-8').trim();
-  } catch (_) {
-    return '';
+  // Newest key wins (the service rewrites it on every start).
+  let best = '', bestTime = 0;
+  for (const dir of appDataDirs()) {
+    const f = path.join(dir, '.session_key');
+    try {
+      const t = fs.statSync(f).mtimeMs;
+      if (t > bestTime) { best = fs.readFileSync(f, 'utf-8').trim(); bestTime = t; }
+    } catch (_) { /* not there */ }
   }
+  return best;
 }
 
 // ── Send Command (with retry) ────────────────────────────────────────────────
@@ -237,7 +289,7 @@ export async function sendCommand(command) {
       const result = await sendCommandOnce(command);
       _lastOk = Date.now();
       if (result.startsWith('ERROR AUTH')) {
-        log('[CMD] Rejected: session key missing or stale — is project_root correct in config.json?');
+        log('[CMD] Rejected: session key missing or stale — is the Deep Work AI app installed and running?');
       }
       log(`[CMD] ${command.split(':')[0]} → ${summarize(result)}`);
       return result;

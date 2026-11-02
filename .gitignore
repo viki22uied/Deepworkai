@@ -27,3 +27,16 @@ deepworkai/plugin/dist/
 # Never commit personal data
 deepworkai/data/
 *.db
+deepworkai/plugin/config.json
+deepworkai/config.json
+
+# Secrets: never commit
+data/.session_key
+data/*.bin
+data/*.tmp
+.env
+
+# Build output
+/build/
+deepworkai/plugin/dist/
+*.lplug4

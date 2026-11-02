@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from deepworkai.service.proc_utils import run_hidden
 
 BASE_DIR = Path(__file__).parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(exist_ok=True)
 DB_PATH  = DATA_DIR / "activity.db"
 
@@ -201,7 +201,7 @@ def get_open_browser_tabs() -> list[str]:
     """
     import urllib.request
     try:
-        with urllib.request.urlopen("http://localhost:9222/json", timeout=2) as r:
+        with urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=2) as r:  # nosec B310 - fixed loopback URL
             tabs = json.loads(r.read())
         return [
             t["url"] for t in tabs

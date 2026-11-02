@@ -12,7 +12,7 @@ import { PluginSDK } from '@logitech/plugin-sdk';
 
 import { FocusKey, ResumeKey, InboxKey } from './src/test-actions.js';
 import { TimeTravelAction } from './src/adjustment-actions.js';
-import { log, ensureService, getProjectRoot } from './src/tcp-client.js';
+import { log, ensureService, getProjectRoot, bundledAppExe } from './src/tcp-client.js';
 
 const pluginSDK = new PluginSDK();
 
@@ -28,12 +28,13 @@ for (const action of ACTIONS) {
   pluginSDK.registerAction(action);
 }
 
-log(`[PLUGIN] Deep Work AI v3.2.0 — ${ACTIONS.length} actions (3 keys + dial)`);
+log(`[PLUGIN] Deep Work AI v4.0.0 — ${ACTIONS.length} actions (3 keys + dial)`);
 
 await pluginSDK.connect();
 
 log('[PLUGIN] Connected to Logitech Options+ — all systems ready');
-log(`[PLUGIN] Project root: ${getProjectRoot() ?? 'NOT FOUND — set project_root in config.json'}`);
+log(bundledAppExe() ? '[PLUGIN] Using bundled Deep Work AI app'
+                    : `[PLUGIN] Development mode, project root: ${getProjectRoot() ?? 'NOT FOUND'}`);
 
 // ── Auto-start Python backend ──────────────────────────────────────────────────
 ensureService().then(ok => {

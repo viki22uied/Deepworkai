@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DB_PATH  = DATA_DIR / "activity.db"
 JOURNAL_PATH = DATA_DIR / "next_step.txt"
 

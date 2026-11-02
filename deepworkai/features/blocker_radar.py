@@ -20,7 +20,7 @@ BASE_DIR = Path(__file__).parent.parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-DATA_DIR   = BASE_DIR / "data"
+from deepworkai.service.paths import DATA_DIR  # one data folder (installed app or repo)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATE_FILE = DATA_DIR / "radar_state.json"
 POLL_SEC   = 60
@@ -38,9 +38,14 @@ def _gh(endpoint: str) -> dict | list | None:
     repo  = _cfg("GITHUB_REPO")
     if not token or not repo:
         return None
+    # Input validation (OWASP ASVS V5): GITHUB_REPO must be exactly "owner/name";
+    # anything else could steer the request to a different API path.
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}", repo) or ".." in repo:
+        return None
     try:
         import urllib.request
-        url = f"https://api.github.com/repos/{repo}/{endpoint}"
+        url = f"https://api.github.com/repos/{repo}/{endpoint}"   # fixed https scheme
         req = urllib.request.Request(
             url, headers={
                 "Authorization": f"token {token}",
@@ -48,14 +53,15 @@ def _gh(endpoint: str) -> dict | list | None:
                 "User-Agent": "DeepWorkAI/2.0",
             }
         )
-        with urllib.request.urlopen(req, timeout=8) as r:
+        with urllib.request.urlopen(req, timeout=8) as r:  # nosec B310 - https only, validated path
             return json.loads(r.read())
     except Exception:
         return None
 
 
 def _ci_status(branch: str) -> str:
-    data = _gh(f"commits/{branch}/check-runs")
+    from urllib.parse import quote
+    data = _gh(f"commits/{quote(branch, safe='')}/check-runs")   # branch names may contain ?, #, ..
     if not isinstance(data, dict):
         return "unknown"
     runs = data.get("check_runs", [])
@@ -82,7 +88,8 @@ def _pr_count() -> int:
 def _branch_behind(branch: str) -> int:
     """Return how many commits behind main/master the branch is."""
     for base in ("main", "master"):
-        data = _gh(f"compare/{base}...{branch}")
+        from urllib.parse import quote
+        data = _gh(f"compare/{quote(base, safe='')}...{quote(branch, safe='')}")
         if isinstance(data, dict):
             return int(data.get("behind_by", 0))
     return 0

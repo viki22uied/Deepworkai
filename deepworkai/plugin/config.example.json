@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional. Copy to %APPDATA%\\DeepWorkAI\\config.json only if the app is not in a standard location.",
+  "project_root": "C:\\path\\to\\Deepworkai",
+  "pythonpath": "C:\\path\\to\\pythonw.exe"
+}
