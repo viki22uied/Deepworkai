@@ -32,48 +32,57 @@ def _run(cmd: list, cwd=None, timeout=3) -> str:
         return ""
 
 
+def _last_ide_title() -> str:
+    """Most recent VS Code/Cursor window title seen by the activity recorder."""
+    import sqlite3
+    db = DATA_DIR / "activity.db"
+    if not db.exists():
+        return ""
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        row = conn.execute(
+            "SELECT details FROM events WHERE event_type='app_switch' "
+            "AND app IN ('VS Code','Cursor') ORDER BY timestamp DESC LIMIT 1").fetchone()
+        conn.close()
+        return (json.loads(row[0]) or {}).get("title", "") if row and row[0] else ""
+    except Exception:
+        return ""
+
+
+def _find_in_workspace(workspace: str, name: str) -> str:
+    """Locate `name` inside the project: changed files first, then a bounded walk."""
+    import os
+    root = Path(workspace)
+    changed = _run(["git", "diff", "--name-only"], cwd=workspace, timeout=3).splitlines()
+    for rel in changed:
+        if Path(rel).name == name and (root / rel).exists():
+            return str(root / rel)
+    skip = {".git", "node_modules", ".venv", "venv", "dist", "build", "__pycache__", ".next", "target"}
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip and not d.startswith(".")]
+        if name in filenames:
+            return str(Path(dirpath) / name)
+        seen += len(filenames)
+        if seen > 20000:            # keep it fast on huge monorepos
+            break
+    return ""
+
+
 def _get_vscode_active_file() -> dict:
     """
-    Probe VS Code / Cursor for active file + line via their CLI.
-    Falls back to reading workspaceStorage JSON.
-    Returns {"file": str, "line": int}
+    The file you're in, from the IDE window title + the open project folder.
+    Returns {"file": str, "line": int}. VS Code doesn't expose the cursor line
+    to other processes, so the line defaults to 1 unless the title carries it.
     """
-    # Method 1: VS Code --status flag outputs active file info on some versions
-    for cli in ["cursor", "code"]:
-        out = _run([cli, "--status"], timeout=4)
-        if out:
-            for line in out.splitlines():
-                if ":" in line and ("\\") in line or "/" in line:
-                    parts = line.strip().split(":")
-                    if len(parts) >= 2:
-                        try:
-                            return {"file": parts[0].strip(), "line": int(parts[1])}
-                        except ValueError:
-                            pass
-
-    # Method 2: Read recently modified VS Code backup files
-    storage_roots = [
-        Path.home() / "AppData" / "Roaming" / "Code"    / "User" / "workspaceStorage",
-        Path.home() / "AppData" / "Roaming" / "Cursor"  / "User" / "workspaceStorage",
-    ]
-    for root in storage_roots:
-        if not root.exists():
-            continue
-        try:
-            backups = sorted(root.rglob("*.json"),
-                             key=lambda f: f.stat().st_mtime, reverse=True)
-            for bf in backups[:5]:
-                data = json.loads(bf.read_text(encoding="utf-8", errors="ignore"))
-                entries = data.get("entries", [])
-                if entries:
-                    resource = entries[0].get("resource", "")
-                    if resource.startswith("file:///"):
-                        resource = resource[8:].replace("/", "\\")
-                    line = entries[0].get("selection", {}).get("startLineNumber", 1)
-                    return {"file": resource, "line": int(line)}
-        except Exception:
-            continue
-
+    from deepworkai.service.ide_context import active_workspace, parse_title
+    title = _last_ide_title()
+    name, _ = parse_title(title)
+    workspace = active_workspace(title)
+    if name and workspace:
+        found = _find_in_workspace(workspace, name)
+        if found:
+            return {"file": found, "line": 1}
     return {"file": "", "line": 1}
 
 
@@ -127,11 +136,20 @@ def restore_anchor() -> str:
     if not fpath:
         return "anchor has no file path"
 
-    # Try cursor first, then code
+    from deepworkai.service.ide_context import safe_cli_arg
+    if not safe_cli_arg(str(fpath)):
+        # `code`/`cursor` are .cmd shims run by cmd.exe — & | < > ^ % " would execute.
+        return f"path has unsafe characters — open {Path(fpath).name}:{line} manually"
+
+    # Use whichever editor CLI is actually installed (Cursor first, then VS Code)
+    import shutil
     for cli in ["cursor", "code"]:
-        result = _run([cli, "--goto", f"{fpath}:{line}"], timeout=5)
-        file_label = Path(fpath).name
-        msg = f"→ {file_label}:{line}"
+        exe = shutil.which(cli)
+        if not exe:
+            continue
+        from deepworkai.service.proc_utils import popen_hidden
+        popen_hidden([exe, "--goto", f"{fpath}:{line}"])
+        msg = f"→ {Path(fpath).name}:{line}"
         if note:
             msg += f" | {note[:40]}"
         return msg
