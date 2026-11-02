@@ -38,7 +38,8 @@ kernel32 = ctypes.windll.kernel32
 # ── Paths ─────────────────────────────────────────────────────────────────────
 # Keep restore snapshots in the "new layer" data directory.
 # This avoids schema collisions with legacy scripts that also use `data/capsules.db`.
-BASE_DIR = Path(__file__).parent.parent  # deepworkai/
+# One data folder for the whole app (<repo>/data) — the UI reads snapshots from here.
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "capsules.db"
@@ -140,7 +141,16 @@ def init_db():
     ALTER TABLE for any columns added in later versions so that
     existing databases are automatically migrated.
     """
+    # A non-database file here (e.g. a Git LFS pointer from a clone without LFS)
+    # used to crash every capture/restore. Move it aside and start fresh.
+    if DB_PATH.exists():
+        with open(DB_PATH, "rb") as fh:
+            if fh.read(16) != b"SQLite format 3\x00":
+                bad = DB_PATH.with_suffix(".invalid")
+                DB_PATH.replace(bad)
+                log.warning("[DB] %s was not a database — moved to %s", DB_PATH, bad.name)
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
 
     # Base schema (safe for fresh installs)
     conn.executescript("""
@@ -460,22 +470,12 @@ def enum_windows() -> list[dict]:
 
 # ── VS Code Context ───────────────────────────────────────────────────────────
 def _get_vscode_context() -> dict:
-    """Read VS Code's most recent workspace path from its storage files."""
-    ctx = {"workspace_path": "", "open_files": []}
-    appdata = os.environ.get("APPDATA", "")
-    storage = Path(appdata) / "Code" / "storage.json"
-    if storage.exists():
-        try:
-            with open(storage, encoding="utf-8") as f:
-                data = json.load(f)
-            wsp = (data.get("windowState", {})
-                       .get("lastActiveWindow", {})
-                       .get("workspaceIdentifier", {}))
-            ctx["workspace_path"] = (wsp.get("configPath") or
-                                     wsp.get("id") or "")
-        except Exception:
-            pass
-    return ctx
+    """The project folder VS Code/Cursor is working in (decoded, real path)."""
+    try:
+        from ide_context import active_workspace
+    except ImportError:
+        from deepworkai.service.ide_context import active_workspace
+    return {"workspace_path": active_workspace(), "open_files": []}
 
 
 # ── Git Context ───────────────────────────────────────────────────────────────
@@ -484,7 +484,7 @@ def _get_git_context(workspace_path: str) -> dict:
     ctx: dict = {"branch": "", "changed_files": [], "recent_commits": []}
     if not workspace_path:
         return ctx
-    path = workspace_path.replace("file:///", "").replace("/", "\\")
+    path = workspace_path
     if not Path(path).exists():
         return ctx
     try:
@@ -669,6 +669,8 @@ def launch_browser(browser_exe: str, tabs: list) -> bool:
     """
     browser_lower = browser_exe.lower()
     all_urls = [t["url"] if isinstance(t, dict) else str(t) for t in tabs]
+    # Security: a value starting with '-' would be parsed as a browser flag.
+    all_urls = [u for u in all_urls if re.match(r"^https?://[^\s]+$", u)]
     # Safety cap
     all_urls = all_urls[:_MAX_TABS_PER_BROWSER]
     if not all_urls:
@@ -763,6 +765,10 @@ def launch_app(process_name: str, saved_exe_path: str = "") -> bool:
             log.warning("[RESTORE] Direct launch failed for %s: %s", name, e)
 
     # Final fallback: PowerShell Start-Process (handles UWP, Store, unregistered apps)
+    # Only plain executable names — anything else could inject PowerShell.
+    if not re.fullmatch(r"[\w.\- ]{1,64}", process_name or ""):
+        log.warning("[RESTORE] Refusing PowerShell launch for unsafe name %r", process_name)
+        return False
     try:
         subprocess.Popen(
             ["powershell", "-WindowStyle", "Hidden", "-Command",
