@@ -180,6 +180,7 @@ def test_connect_panel_encrypts_and_wipes_token(qapp, tmp_path, monkeypatch, cap
     for k in ("GITHUB_TOKEN", "SLACK_TOKEN", "JIRA_TOKEN", "JIRA_URL", "JIRA_EMAIL"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(ss, "_env_file", lambda: {})
+    monkeypatch.setenv("DEEPWORKAI_OFFLINE", "1")                # no call to GitHub with a fake token
     p = hub.ConnectPanel()
     field = p.findChildren(QLineEdit)[0]                       # GitHub token
     assert field.echoMode() == QLineEdit.EchoMode.Password

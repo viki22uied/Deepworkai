@@ -913,6 +913,26 @@ SERVICES = [
 ]
 
 
+def _check_token(values: dict) -> str:
+    """Ask the service itself whether the token can read what the Inbox needs. '' = fine."""
+    import os
+    if os.environ.get("DEEPWORKAI_OFFLINE") == "1" or "GITHUB_TOKEN" not in values:
+        return ""
+    try:
+        import requests
+        r = requests.get("https://api.github.com/notifications", timeout=8,
+                         headers={"Authorization": f"token {values['GITHUB_TOKEN']}",
+                                  "Accept": "application/vnd.github+json"})
+    except Exception:
+        return ""                                     # offline right now: save it, polling retries
+    if r.status_code == 401:
+        return "GitHub rejected this token. Check you copied all of it."
+    if r.status_code == 403:
+        return ("This token can't read notifications. Fine-grained tokens can't: create a "
+                "classic token with the notifications box ticked.")
+    return ""
+
+
 class ConnectPanel(QFrame):
     """Connect GitHub/Slack/Jira from the Inbox. Tokens are encrypted for this Windows user
     (DPAPI) the moment you press Connect, the field is wiped, and they are never shown again."""
@@ -976,6 +996,12 @@ class ConnectPanel(QFrame):
                 msg.setText("That doesn't look right: no spaces, and paste only the token."); return
             if k == "JIRA_URL" and not v.startswith("https://"):
                 msg.setText("The Jira site must start with https://"); return
+        problem = _check_token(values)
+        if problem:
+            for _, e, secret in fields:
+                if secret:
+                    e.clear()
+            msg.setText(problem); return
         try:
             from deepworkai.service.secrets_store import set_secret
             for k, v in values.items():

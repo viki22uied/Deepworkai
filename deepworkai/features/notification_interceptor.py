@@ -107,6 +107,7 @@ def _poll_github():
             timeout=8,
         )
         if resp.status_code != 200:
+            log.warning("[INTERCEPTOR] GitHub refused the request (HTTP %d)", resp.status_code)
             return
         _last_poll["github"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         _ingest_github(resp.json())
@@ -122,7 +123,8 @@ def _ingest_github(items: list):
         repo     = item.get("repository", {}).get("full_name", "")
         kind     = subject.get("type", "")        # "PullRequest", "Issue", etc.
         title    = subject.get("title", "")
-        url      = subject.get("url", "") or subject.get("html_url", "")
+        # The API gives api.github.com/repos/o/r/pulls/1; "Open" needs the web page.
+        url      = (subject.get("url", "") or "").replace("https://api.github.com/repos/", "https://github.com/")                                              .replace("/pulls/", "/pull/")
         reason   = item.get("reason", "")         # subscribed, mention, review_requested …
         notif_id = f"gh-{item.get('id', '')}"
 
