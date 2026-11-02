@@ -478,7 +478,10 @@ All commands are plain UTF-8 strings terminated with `\n`. Send them to `127.0.0
 | `RESUME` | Restore workspace + anchored line, open the Focus view (Resume key ×1) |
 | `SAVE_SPOT` | Capture workspace + anchor file:line (Focus key ×3) |
 | `HUB` | Open the Hub on Inbox if items are waiting, else Focus (Inbox key ×1) |
-| `DIAL:<ticks>` | Context-aware dial: steps the debugger during a debug session, else time travel |
+| `DIAL:<ticks>` | Context-aware dial: steps the debugger during a debug session, else moves the Time Travel selection |
+| `TRAVEL_COMMIT` | Restore the selected moment (or cancel if on *Now*) — sent when the dial stops |
+| `TRAVEL_GO:<id>` | Restore a specific moment (clicked in the overlay) |
+| `TRAVEL_CLOSE` | Close the Time Travel overlay without restoring |
 | `WORKFLOW_STATUS` | Current activity + focus score as JSON |
 | `WHERE_WAS_I` | Last automatically captured context |
 | `INSIGHTS` | 7-day focus analytics as JSON |
@@ -614,7 +617,8 @@ deepworkai/
 │   │   ├── proc_utils.py             # Hidden subprocess helpers
 │   │   └── paths.py                  # Centralised path constants
 │   ├── ui/
-│   │   └── hub.py                    # The Hub window: Focus · Inbox · Insights
+│   │   ├── hub.py                    # The Hub window: Focus · Inbox · Insights
+│   │   └── timetravel.py             # Time Travel overlay shown while turning the dial
 │   ├── features/
 │   │   ├── workflow_intelligence.py  # Local AI: activity, focus score, auto-capture, routing
 │   │   ├── focus_mode.py             # Focus session start/stop/toggle
@@ -655,7 +659,22 @@ Three keys and the dial reach every feature. Press once, twice or three times qu
 | **Focus** | Focus Shield on/off (saves your workspace first) | Meeting Mode on/off | Save my spot (snapshot + Context Anchor) |
 | **Resume** | Restore workspace, jump back to the anchored line, show Cognitive Rewind | Micro-Journal note | — |
 | **Inbox** | Open the Hub (Triage if something is waiting, otherwise Focus) | Queue this interruption | Release everything held |
-| **Dial** | Time Travel: turn to go back, stop to restore. During a debug session it steps the debugger (→ Step Over, ← Step Out) | | |
+| **Dial** | Time Travel: turn to go back, stop to restore (see below). During a debug session it steps the debugger (→ Step Over, ← Step Out) | | |
+
+### Time Travel overlay
+
+Turning the dial opens a timeline of your saved moments. Each stop shows **what you were doing then**:
+the time and how long ago, the activity (coding, debugging, reviewing…), focus score, repo and branch,
+the file you were in, changed files, the browser tabs you had open and your Micro-Journal note.
+
+- Turn **←** to go further back, **→** towards *Now* (stopping on *Now* cancels; nothing changes)
+- Stop turning and the selected moment is restored after 2.5 s (a progress bar shows the countdown)
+- Or click any moment to jump straight to it; `Esc` cancels
+
+Moments are saved automatically every 10 minutes while you're working (skipped when idle or when nothing
+changed), when you start Focus Shield, and when you press *Save my spot*. Automatic moments are pruned
+after `DEEPWORKAI_RETENTION_DAYS`; ones you saved yourself are kept. Preview it with
+`python -m deepworkai.ui.timetravel --demo`.
 
 Everything else runs on its own: the notification classifier and router, Focus Depth Timer,
 Blocker Radar, Git Branch Pulse and automatic context capture. The Hub's Focus tab shows
