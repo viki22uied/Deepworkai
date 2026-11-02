@@ -77,7 +77,13 @@ class Data:
                     "where_ago": _ago((datetime.now() - timedelta(minutes=12)).isoformat()),
                     "anchor": "anchored processor.py:214",
                     "next_step": "Add regression test for empty card token",
-                    "timeline": [62, 70, 74, 80, 85, 81, 40, 55, 72, 78]}
+                    "timeline": [62, 70, 74, 80, 85, 81, 40, 55, 72, 78],
+                    "rewind": {"last_ide_file": "processor.py",
+                               "changed_files": ["src/payments/processor.py", "tests/test_processor.py"],
+                               "browser_tabs": ["https://github.com/acme/payments-api/pull/412",
+                                                "https://stackoverflow.com/questions/1234/null-card-token"]},
+                    "radar": {"ci": "fail", "prs": 2, "behind": 3, "branch": "fix/null-check"},
+                    "palette": [{"label": l} for l in ("Tests", "Dev", "Build", "Push", "Pull", "Logs")]}
         st = _q(DATA / "intelligence.db",
                 "SELECT activity, focus_score, ts FROM state_log ORDER BY ts DESC LIMIT 40")
         ctx = _q(DATA / "intelligence.db", "SELECT * FROM auto_context ORDER BY ts DESC LIMIT 1")
@@ -108,7 +114,46 @@ class Data:
             "anchor": ctx[0]["anchor"] if ctx else "",
             "next_step": note,
             "timeline": [r["focus_score"] for r in reversed(st[:20])],
+            "rewind": self._rewind(),
+            "radar": self._radar(),
+            "palette": self._palette(),
         }
+
+    @staticmethod
+    def _rewind() -> dict:
+        try:
+            from deepworkai.features.cognitive_rewind import build_rewind_context
+            c = build_rewind_context(minutes=30)
+            return {"last_ide_file": c.get("last_ide_file") or "",
+                    "changed_files": (c.get("git") or {}).get("changed_files", [])[:4],
+                    "browser_tabs": c.get("browser_tabs", [])[:3]}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _radar() -> dict:
+        f = DATA / "radar_state.json"
+        try:
+            return json.loads(f.read_text()) if f.exists() else {}
+        except ValueError:
+            return {}
+
+    @staticmethod
+    def _palette() -> list[dict]:
+        try:
+            from deepworkai.features.terminal_palette import load_palette
+            return load_palette()
+        except Exception:
+            return []
+
+    def run_palette(self, slot: int) -> str:
+        if self.demo:
+            return "demo"
+        try:
+            from deepworkai.features.terminal_palette import run_slot
+            return run_slot(slot)
+        except Exception as e:
+            return str(e)
 
     def inbox(self) -> list[dict]:
         if self.demo:
@@ -297,6 +342,16 @@ def _icon_path(name: str) -> QPainterPath:
     elif name == "moon":
         p.moveTo(14.5, 13.5); p.cubicTo(9, 15, 5, 10, 8, 4.5); p.cubicTo(3, 6, 3, 15, 9.5, 16.5)
         p.cubicTo(12, 17, 14, 15.5, 14.5, 13.5)
+    elif name == "terminal":
+        p.addRoundedRect(QRectF(2.5, 4, 15, 12), 2.5, 2.5)
+        p.moveTo(6, 8); p.lineTo(8.5, 10); p.lineTo(6, 12); p.moveTo(10, 12.5); p.lineTo(14, 12.5)
+    elif name == "rewind":
+        p.moveTo(4, 10); p.cubicTo(4, 4, 13, 2.5, 16, 8); p.moveTo(4, 10); p.lineTo(2.5, 7.5)
+        p.moveTo(4, 10); p.lineTo(6.8, 8.6)
+        p.moveTo(16, 12); p.cubicTo(14.5, 16, 8, 17.5, 5.5, 14)
+    elif name == "radar":
+        p.addEllipse(QPointF(10, 10), 7.5, 7.5); p.addEllipse(QPointF(10, 10), 4, 4)
+        p.moveTo(10, 10); p.lineTo(15.3, 4.7)
     elif name == "close":
         p.moveTo(6, 6); p.lineTo(14, 14); p.moveTo(14, 6); p.lineTo(6, 14)
     elif name == "sparkle":
@@ -557,10 +612,66 @@ class FocusPage(Page):
         grid.addWidget(w, 3); grid.addWidget(n, 2)
         self.lay.addLayout(grid)
 
+        grid2 = QHBoxLayout(); grid2.setSpacing(16)
+        rw = d.get("rewind") or {}
+        r, rl = card()
+        rl.addLayout(caption("rewind", "Since you left · cognitive rewind", SYS["teal"]))
+        lines = []
+        if rw.get("last_ide_file"):
+            lines.append(("code", rw["last_ide_file"]))
+        lines += [("pencil", f) for f in rw.get("changed_files", [])]
+        lines += [("book", u.split("://", 1)[-1][:60]) for u in rw.get("browser_tabs", [])]
+        if not lines:
+            rl.addWidget(label("Your files, changes and relevant tabs from the last 30 minutes "
+                               "will show up here.", 13, color=T["text2"], wrap=True))
+        for ic, txt in lines[:6]:
+            row_ = QHBoxLayout(); row_.setSpacing(8)
+            row_.addWidget(Icon(ic, T["text3"], 14, 1.6))
+            row_.addWidget(label(txt, 12.5, color=T["text2"])); row_.addStretch()
+            rl.addLayout(row_)
+        rl.addStretch()
+        rd = d.get("radar") or {}
+        b, bl = card()
+        bl.addLayout(caption("radar", "Blocker radar", SYS["green"]))
+        if rd:
+            ci = rd.get("ci", "unknown")
+            ci_col = {"pass": SYS["green"], "fail": SYS["red"], "pending": SYS["orange"]}.get(ci, SYS["gray"])
+            for k, v, col in (("CI", {"pass": "Passing", "fail": "Failing", "pending": "Running"}.get(ci, "Unknown"), ci_col),
+                              ("Reviews", f"{rd.get('prs', 0)} waiting", SYS["blue"] if rd.get("prs") else SYS["gray"]),
+                              ("Behind main", f"{rd.get('behind', 0)} commits",
+                               SYS["orange"] if rd.get("behind", 0) > 10 else SYS["gray"])):
+                row_ = QHBoxLayout()
+                row_.addWidget(label(k, 13, color=T["text2"])); row_.addStretch()
+                row_.addWidget(capsule(v, col))
+                bl.addLayout(row_)
+        else:
+            bl.addWidget(label("Add GITHUB_TOKEN and GITHUB_REPO to .env to see CI, reviews and "
+                               "branch health here.", 13, color=T["text2"], wrap=True))
+        bl.addStretch()
+        grid2.addWidget(r, 3); grid2.addWidget(b, 2)
+        self.lay.addLayout(grid2)
+
         c, cl = card(spacing=12)
         cl.addLayout(caption("chart", "Focus · last 10 minutes", SYS["indigo"]))
         cl.addWidget(AreaChart(d["timeline"] or [0, 0], color))
         self.lay.addWidget(c)
+
+        pal = d.get("palette") or []
+        if pal:
+            q, ql = card(spacing=12)
+            ql.addLayout(caption("terminal", "Quick commands · terminal palette", SYS["orange"]))
+            row_ = QHBoxLayout(); row_.setSpacing(8)
+            for i, slot in enumerate(pal[:6]):
+                btn = QPushButton(slot.get("label", f"Slot {i}"))
+                btn.setFont(font(12.5, QFont.Weight.DemiBold))
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setToolTip(slot.get("cmd", ""))
+                btn.setStyleSheet(f"QPushButton {{ background: {T['sel']}; border-radius: 10px; padding: 8px 0; }}"
+                                  f"QPushButton:hover {{ background: {T['hover']}; color: {SYS['blue']}; }}")
+                btn.clicked.connect(lambda _, k=i: self.data.run_palette(k))
+                row_.addWidget(btn, 1)
+            ql.addLayout(row_)
+            self.lay.addWidget(q)
 
 
 class InboxPage(QWidget):
