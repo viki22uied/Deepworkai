@@ -33,7 +33,7 @@ log(`[PLUGIN] Deep Work AI v4.0.0 — ${ACTIONS.length} actions (3 keys + dial)`
 await pluginSDK.connect();
 
 log('[PLUGIN] Connected to Logitech Options+ — all systems ready');
-log(`[PLUGIN] Project root: ${getProjectRoot() ?? 'NOT FOUND — set project_root in config.json'}`);
+log(`[PLUGIN] Project root: ${getProjectRoot() ?? 'NOT FOUND — install the Deep Work AI app'}`);
 
 // ── Auto-start Python backend ──────────────────────────────────────────────────
 ensureService().then(ok => {

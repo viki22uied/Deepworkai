@@ -51,14 +51,17 @@ export function log(msg) {
 // plugin is installed via `logitoolkit pack` it lives inside the Logi plugin
 // directory, far from the repo. So never assume a fixed relative layout —
 // search a few candidate locations instead.
+function userConfigDir() {
+  // Per-user settings live outside the plugin folder, which Options+ replaces on every update.
+  if (process.platform === 'win32' && process.env.APPDATA) return path.join(process.env.APPDATA, 'DeepWorkAI');
+  return path.join(process.env.HOME || '', '.config', 'deepworkai');
+}
+
 function getConfig() {
   const candidates = [
-    path.resolve(__dirname, '..', 'config.json'),                  // plugin/config.json (linked/dev)
-    path.resolve(__dirname, 'config.json'),
-    process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH
-      ? path.join(process.env.LPS_PLUGIN_PACKAGE_DIRECTORY_PATH, 'config.json')
-      : null,
-  ].filter(Boolean);
+    path.join(userConfigDir(), 'config.json'),                     // per-user (marketplace installs)
+    path.resolve(__dirname, '..', 'config.json'),                  // plugin/config.json (development)
+  ];
   for (const configFile of candidates) {
     try {
       if (fs.existsSync(configFile)) {
@@ -85,6 +88,10 @@ export function getProjectRoot() {
   if (cfg.service_script && fs.existsSync(cfg.service_script)) {
     return path.resolve(path.dirname(cfg.service_script), '..', '..');
   }
+  // Standard per-user install location of the Deep Work AI app.
+  const standard = process.platform === 'win32' && process.env.LOCALAPPDATA
+    ? path.join(process.env.LOCALAPPDATA, 'DeepWorkAI') : null;
+  if (standard && fs.existsSync(path.join(standard, SERVICE_REL))) return standard;
   // Walk up from the bundle location (works when the plugin is linked from the repo).
   let dir = __dirname;
   for (let i = 0; i < 6; i++) {
@@ -146,7 +153,7 @@ function spawnService() {
     const servicePath = getServicePath();
 
     if (!servicePath || !fs.existsSync(servicePath)) {
-      log(`[SPAWN] ERROR: Service not found (${servicePath}). Set project_root in plugin/config.json or DEEPWORKAI_ROOT.`);
+      log(`[SPAWN] ERROR: Service not found (${servicePath}). Install the Deep Work AI app, or set project_root in %APPDATA%\\DeepWorkAI\\config.json.`);
       _serviceSpawning = false;
       resolve(false);
       return;
@@ -237,7 +244,7 @@ export async function sendCommand(command) {
       const result = await sendCommandOnce(command);
       _lastOk = Date.now();
       if (result.startsWith('ERROR AUTH')) {
-        log('[CMD] Rejected: session key missing or stale — is project_root correct in config.json?');
+        log('[CMD] Rejected: session key missing or stale — is the Deep Work AI app installed and running?');
       }
       log(`[CMD] ${command.split(':')[0]} → ${summarize(result)}`);
       return result;
