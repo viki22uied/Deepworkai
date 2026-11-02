@@ -280,7 +280,10 @@ def _handle_shield_off() -> str:
 
 
 def _handle_shield_toggle() -> str:
-    return _handle_shield_off() if _shield_state.get("active") else _handle_shield_on()
+    on = not _shield_state.get("active")
+    r = _handle_shield_on() if on else _handle_shield_off()
+    _toast("Focus Shield ON" if on else "Focus Shield OFF")
+    return r
 
 
 # ── The one UI (Hub) ───────────────────────────────────────────────────────────
@@ -323,6 +326,17 @@ def _ui(tab: str = "focus", **extra) -> str:
     return f"OK UI {tab}"
 
 
+def _toast(text: str):
+    """On-screen confirmation for keys that open no window (the SDK can't relabel keys)."""
+    try:
+        tmp = UI_CMD.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"action": "toast", "text": text, "ts": time.time()}))
+        tmp.replace(UI_CMD)
+        _ui_ensure()
+    except Exception as e:
+        log.debug("[UI] toast: %s", e)
+
+
 def _handle_triage_show(tab: str = "inbox") -> str:
     return _ui(tab).replace("UI", "TRIAGE_SHOW", 1)
 
@@ -330,7 +344,9 @@ def _handle_triage_show(tab: str = "inbox") -> str:
 # Meeting Mode
 def _handle_meeting_toggle() -> str:
     from deepworkai.features.meeting_mode import toggle_meeting
-    return f"OK MEETING_TOGGLE {toggle_meeting()}"
+    r = toggle_meeting()
+    _toast("Meeting over: restoring workspace" if "ended" in r else "Meeting mode ON")
+    return f"OK MEETING_TOGGLE {r}"
 
 def _handle_meeting_start() -> str:
     from deepworkai.features.meeting_mode import meeting_start
@@ -494,6 +510,7 @@ def _handle_save_spot() -> str:
         anchor = _handle_anchor_save()
     except Exception as e:
         anchor = f"anchor unavailable ({e})"
+    _toast("Spot saved")
     return f"OK SAVE_SPOT {cap[3:]} | {anchor[3:]}"
 
 
@@ -863,6 +880,11 @@ def _handle_client(conn: socket.socket):
 
 
 def main():
+    try:                                   # already running: leave its port and session key alone
+        socket.create_connection((HOST, PORT), timeout=0.5).close()
+        return
+    except OSError:
+        pass
     log.info("=" * 60)
     log.info("Deep Work AI Service v2 — port %d", PORT)
 
@@ -912,7 +934,8 @@ def main():
         pass
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # On Windows SO_REUSEADDR lets a second process take over the port; demand exclusive use.
+    server.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR), 1)
     try:
         server.bind((HOST, PORT))
     except OSError as e:
