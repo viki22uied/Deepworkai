@@ -31,10 +31,11 @@ if str(ROOT) not in sys.path:
 DATA = ROOT / "data"
 
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPoint, QPointF
-from PyQt6.QtGui import (QBrush, QColor, QConicalGradient, QFont, QGuiApplication,
-                         QLinearGradient, QPainter, QPainterPath, QPen)
+from PyQt6.QtGui import (QBrush, QColor, QConicalGradient, QFont, QGuiApplication, QImage,
+                         QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient)
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+from PyQt6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit, QPushButton,
+                             QSizePolicy,
                              QScrollArea, QStackedWidget, QVBoxLayout, QWidget)
 
 # ── Data (local SQLite only) ──────────────────────────────────────────────────
@@ -215,36 +216,59 @@ class Data:
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
-# Apple-style system palette. Light & dark; follows the OS by default.
+# Monochrome bento palette (neutral, shadcn-style). Colour is reserved for the
+# one thing that must stand out: a HIGH-priority interruption.
 DARK = {
-    "window": "#151517", "sidebar": "#1c1c1f", "card": "#232327", "card2": "#1f1f23",
-    "hover": "#2a2a2f", "line": "rgba(255,255,255,0.07)", "line_q": QColor(255, 255, 255, 18),
-    "text": "#f5f5f7", "text2": "#a1a1a6", "text3": "#6e6e73", "track": QColor(255, 255, 255, 22),
-    "sel": "rgba(255,255,255,0.08)", "seg": "#2c2c31", "seg_on": "#45454b",
+    "window": "#0a0a0a", "sidebar": "#0a0a0a", "card": "#171717", "card2": "#171717",
+    "muted": "#262626", "hover": "#1f1f1f", "line": "#262626", "line_q": QColor(255, 255, 255, 16),
+    "text": "#fafafa", "text2": "#a3a3a3", "text3": "#737373", "track": QColor(255, 255, 255, 26),
+    "sel": "#1f1f1f", "seg": "#171717", "seg_on": "#262626",
+    "primary": "#e5e5e5", "on_primary": "#171717", "on_primary2": "#525252",
 }
 LIGHT = {
-    "window": "#f5f5f7", "sidebar": "#ebebef", "card": "#ffffff", "card2": "#fbfbfd",
-    "hover": "#f2f2f5", "line": "rgba(0,0,0,0.06)", "line_q": QColor(0, 0, 0, 14),
-    "text": "#1d1d1f", "text2": "#6e6e73", "text3": "#aeaeb2", "track": QColor(0, 0, 0, 16),
-    "sel": "rgba(0,0,0,0.06)", "seg": "#e3e3e8", "seg_on": "#ffffff",
+    "window": "#ffffff", "sidebar": "#ffffff", "card": "#ffffff", "card2": "#ffffff",
+    "muted": "#f5f5f5", "hover": "#f5f5f5", "line": "#e5e5e5", "line_q": QColor(0, 0, 0, 14),
+    "text": "#0a0a0a", "text2": "#525252", "text3": "#a3a3a3", "track": QColor(0, 0, 0, 20),
+    "sel": "#f5f5f5", "seg": "#f5f5f5", "seg_on": "#ffffff",
+    "primary": "#171717", "on_primary": "#fafafa", "on_primary2": "#a3a3a3",
 }
-SYS = {"blue": "#0a84ff", "green": "#30d158", "orange": "#ff9f0a", "red": "#ff453a",
-       "purple": "#bf5af2", "indigo": "#5e5ce6", "teal": "#64d2ff", "gray": "#8e8e93"}
+SYS: dict = {}
 T = dict(DARK)
 
-PRIORITY = {"HIGH": SYS["red"], "MEDIUM": SYS["orange"], "LOW": SYS["gray"]}
-SOURCE = {"slack": ("bubble", SYS["purple"]), "github": ("merge", SYS["indigo"]),
-          "jira": ("ticket", SYS["blue"]), "teams": ("bubble", SYS["indigo"]),
-          "manual": ("pencil", SYS["gray"])}
+
+def _apply_accents():
+    """Every former accent becomes a shade of grey; red stays for urgent items only."""
+    SYS.clear()
+    SYS.update({k: T["text"] for k in ("blue", "green", "teal", "indigo", "purple", "orange")})
+    SYS.update(gray=T["text3"], red="#f87171" if T is not None and T["window"] == DARK["window"] else "#dc2626")
+
+
+_apply_accents()
+PRIORITY: dict = {}
+SOURCE = {"slack": ("bubble", "gray"), "github": ("merge", "gray"), "jira": ("ticket", "gray"),
+          "teams": ("bubble", "gray"), "manual": ("pencil", "gray")}
 ACTIVITY = {
-    "coding":        ("Coding",        "code",    SYS["blue"]),
-    "debugging":     ("Debugging",     "bug",     SYS["red"]),
-    "reviewing":     ("Reviewing",     "merge",   SYS["teal"]),
-    "researching":   ("Researching",   "book",    SYS["orange"]),
-    "communicating": ("Communicating", "bubble",  SYS["purple"]),
-    "meeting":       ("In a meeting",  "clock",   SYS["indigo"]),
-    "idle":          ("Idle",          "moon",    SYS["gray"]),
+    "coding":        ("Coding",        "code",    "text"),
+    "debugging":     ("Debugging",     "bug",     "text"),
+    "reviewing":     ("Reviewing",     "merge",   "text"),
+    "researching":   ("Researching",   "book",    "text"),
+    "communicating": ("Communicating", "bubble",  "text"),
+    "meeting":       ("In a meeting",  "clock",   "text"),
+    "idle":          ("Idle",          "moon",    "text"),
 }
+
+
+def _resolve_palette():
+    """Colour names in SOURCE/ACTIVITY → current theme colours."""
+    PRIORITY.clear()
+    PRIORITY.update({"HIGH": SYS["red"], "MEDIUM": T["text2"], "LOW": T["text3"]})
+    for k, (ic, c) in list(SOURCE.items()):
+        SOURCE[k] = (ic, T["text2"])
+    for k, (n, ic, c) in list(ACTIVITY.items()):
+        ACTIVITY[k] = (n, ic, T["text"])
+
+
+_resolve_palette()
 FONT_FAMILIES = ["Segoe UI Variable Display", "SF Pro Display", "Inter Display", "Inter", "Segoe UI"]
 TEXT_FAMILIES = ["Segoe UI Variable Text", "SF Pro Text", "Inter", "Segoe UI"]
 
@@ -263,25 +287,27 @@ def font(px: float, weight=QFont.Weight.Normal, display: bool = False) -> QFont:
 def qss() -> str:
     return f"""
     QWidget {{ color: {T['text']}; background: transparent; }}
-    #root {{ background: {T['window']}; border-radius: 20px; border: 1px solid {T['line']}; }}
-    #sidebar {{ background: {T['sidebar']}; border-top-left-radius: 20px;
-                border-bottom-left-radius: 20px; border-right: 1px solid {T['line']}; }}
-    #card {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 {T['card']}, stop:1 {T['card2']});
-             border: 1px solid {T['line']}; border-radius: 18px; }}
+    #root {{ background: {T['window']}; border-radius: 24px; border: 1px solid {T['line']}; }}
+    #sidebar {{ background: {T['sidebar']}; border-top-left-radius: 24px;
+                border-bottom-left-radius: 24px; border-right: 1px solid {T['line']}; }}
+    #card {{ background: {T['card']}; border: 1px solid {T['line']}; border-radius: 24px; }}
+    #mutedcard {{ background: {T['muted']}; border: 1px solid {T['line']}; border-radius: 24px; }}
     QPushButton {{ border: none; }}
-    QPushButton#nav {{ text-align: left; padding: 9px 12px 9px 40px; border-radius: 10px;
+    QPushButton#nav {{ text-align: left; padding: 9px 12px 9px 40px; border-radius: 12px;
                        color: {T['text2']}; }}
     QPushButton#nav:hover {{ background: {T['sel']}; color: {T['text']}; }}
-    QPushButton#nav:checked {{ background: {T['sel']}; color: {T['text']}; }}
-    #segment {{ background: {T['seg']}; border-radius: 10px; }}
-    QPushButton#seg {{ padding: 6px 14px; border-radius: 8px; color: {T['text2']}; }}
-    QPushButton#seg:checked {{ background: {T['seg_on']}; color: {T['text']}; }}
-    QPushButton#link {{ color: {SYS['blue']}; padding: 4px 6px; }}
-    QPushButton#link:hover {{ color: #409cff; }}
-    QPushButton#quiet {{ color: {T['text2']}; padding: 4px 6px; }}
+    QPushButton#nav:checked {{ background: {T['muted']}; color: {T['text']}; }}
+    #segment {{ background: {T['card']}; border: 1px solid {T['line']}; border-radius: 12px; }}
+    QPushButton#seg {{ padding: 6px 14px; border-radius: 9px; color: {T['text3']}; }}
+    QPushButton#seg:checked {{ background: {T['muted']}; color: {T['text']}; }}
+    QPushButton#link {{ color: {T['text']}; padding: 4px 6px; }}
+    QPushButton#link:hover {{ color: {T['text2']}; }}
+    QPushButton#quiet {{ color: {T['text3']}; padding: 4px 6px; }}
     QPushButton#quiet:hover {{ color: {T['text']}; }}
-    QPushButton#pill {{ background: {SYS['blue']}; color: white; padding: 6px 14px; border-radius: 14px; }}
-    QPushButton#pill:hover {{ background: #409cff; }}
+    QPushButton#pill {{ background: {T['text']}; color: {T['window']}; padding: 6px 14px; border-radius: 14px; }}
+    QPushButton#chipbtn {{ background: {T['muted']}; color: {T['text2']}; border: 1px solid {T['line']};
+                           border-radius: 12px; padding: 9px 0; }}
+    QPushButton#chipbtn:hover {{ color: {T['text']}; border-color: {T['text3']}; }}
     QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
     QScrollBar:vertical {{ background: transparent; width: 6px; margin: 2px; }}
     QScrollBar::handle:vertical {{ background: {T['line']}; border-radius: 3px; min-height: 30px; }}
@@ -414,14 +440,139 @@ def caption(icon: str, text: str, color: str) -> QHBoxLayout:
     return r
 
 
-def capsule(text: str, color: str) -> QLabel:
-    l = QLabel(text)
-    l.setTextFormat(Qt.TextFormat.PlainText)
-    l.setFont(font(11, QFont.Weight.DemiBold))
-    c = QColor(color)
-    l.setStyleSheet(f"color: {color}; background: rgba({c.red()},{c.green()},{c.blue()},0.14);"
-                    "border-radius: 10px; padding: 3px 10px;")
+class Pill(QLabel):
+    """Rounded pill drawn by hand (Qt ignores border-radius on some label styles)."""
+    def __init__(self, text: str, fg: str, bg: QColor):
+        super().__init__(text)
+        self._bg = bg
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setStyleSheet(f"color: {fg}; background: transparent; padding: 5px 12px;")
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+
+    def paintEvent(self, e):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self._bg)
+        r = QRectF(self.rect()); p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        p.end()
+        super().paintEvent(e)
+
+
+def capsule(text: str, color: str | None = None, on_primary: bool = False) -> QLabel:
+    """Small uppercase pill (like 'MARKET SHARE'). Monochrome unless urgent (red)."""
+    if on_primary:
+        fg = T["on_primary2"]
+        bg = QColor(T["on_primary"]); bg.setAlpha(22)
+    elif color and color == SYS.get("red"):
+        fg = color; bg = QColor(color); bg.setAlpha(30)
+    else:
+        fg = T["text2"]; bg = QColor(T["muted"])
+    l = Pill(text.upper(), fg, bg)
+    f = font(10.5, QFont.Weight.DemiBold)
+    f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.2)
+    l.setFont(f)
     return l
+
+
+def overline(text: str, color: str | None = None) -> QLabel:
+    """Tracked uppercase label ('GROWTH')."""
+    l = QLabel(text.upper()); l.setTextFormat(Qt.TextFormat.PlainText)
+    f = font(11, QFont.Weight.DemiBold); f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
+    l.setFont(f); l.setStyleSheet(f"color: {color or T['text3']};")
+    return l
+
+
+def big(text: str, px: int, color: str | None = None) -> QLabel:
+    """Oversized, thin, tightly tracked number — the hero of each card."""
+    l = QLabel(text); l.setTextFormat(Qt.TextFormat.PlainText)
+    f = font(px, QFont.Weight.Light, display=True)
+    f.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 94 if px >= 48 else 98)
+    l.setFont(f); l.setStyleSheet(f"color: {color or T['text']};")
+    return l
+
+
+def muted_card(pad: int = 26, spacing: int = 8) -> tuple[QFrame, QVBoxLayout]:
+    f = QFrame(); f.setObjectName("mutedcard")
+    lay = QVBoxLayout(f); lay.setContentsMargins(pad, pad, pad, pad); lay.setSpacing(spacing)
+    return f, lay
+
+
+class HatchCard(QFrame):
+    """The light hero card: soft fill + 45° hatching that fades out from the top-right."""
+    def __init__(self, pad: int = 34, spacing: int = 8):
+        super().__init__()
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(pad, pad, pad, pad); self.lay.setSpacing(spacing)
+        self._cache: tuple | None = None
+
+    def _hatch(self, w: int, h: int, dpr: float) -> QImage:
+        img = QImage(int(w * dpr), int(h * dpr), QImage.Format.Format_ARGB32_Premultiplied)
+        img.setDevicePixelRatio(dpr); img.fill(Qt.GlobalColor.transparent)
+        p = QPainter(img); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = QColor(128, 128, 128, 90); p.setPen(QPen(c, 1))
+        for x in range(-h, w + h, 10):
+            p.drawLine(QPointF(x, 0), QPointF(x + h, h))
+        # fade: ellipse anchored at the top-right corner (80% × 50%)
+        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        p.translate(w, 0); p.scale(w * 0.8, h * 0.5)
+        g = QRadialGradient(QPointF(0, 0), 1.0)
+        g.setColorAt(0.0, QColor(0, 0, 0, 255)); g.setColorAt(0.64, QColor(0, 0, 0, 255))
+        g.setColorAt(1.0, QColor(0, 0, 0, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.fillRect(QRectF(-2.0, -1.0, 3.0, 4.0), QBrush(g))   # whole card: outside the ellipse → transparent
+        p.end()
+        return img
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath(); path.addRoundedRect(r, 24, 24)
+        p.fillPath(path, QColor(T["primary"]))
+        key = (self.width(), self.height(), self.devicePixelRatioF())
+        if not self._cache or self._cache[0] != key:          # rebuilt only on resize
+            self._cache = (key, self._hatch(self.width(), self.height(), self.devicePixelRatioF()))
+        p.setClipPath(path); p.setOpacity(0.3 if T["primary"] == DARK["primary"] else 0.45)
+        p.drawImage(0, 0, self._cache[1])
+
+
+class Bars(QWidget):
+    """Slim rounded bars (the 'Growth' sparkline). Values 0-100."""
+    def __init__(self, values: list[float], height: int = 34, bar: float = 6, gap: float = 4,
+                 color: str | None = None, dim_until: int = 0):
+        super().__init__()
+        self.values = [max(0.0, min(100.0, float(v))) for v in values] or [0.0]
+        self.color = QColor(color or T["text"]); self.bar, self.gap = bar, gap
+        self.dim_until = dim_until
+        self.setFixedHeight(height)
+        self.setFixedWidth(int(len(self.values) * (bar + gap) - gap))
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        for i, v in enumerate(self.values):
+            h = max(self.bar, v / 100 * self.height())
+            c = QColor(self.color)
+            if i < self.dim_until:
+                c.setAlpha(90)
+            p.setBrush(c)
+            p.drawRoundedRect(QRectF(i * (self.bar + self.gap), self.height() - h, self.bar, h),
+                              self.bar / 2, self.bar / 2)
+
+
+class Badge(QWidget):
+    """Round icon badge (the ★ circle)."""
+    def __init__(self, icon: str, size: int = 44):
+        super().__init__()
+        self.icon = icon; self.setFixedSize(size, size)
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        s = self.width()
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(T["window"]))
+        p.drawEllipse(QRectF(0, 0, s, s))
+        p.translate(s * 0.27, s * 0.27); p.scale(s * 0.46 / 20, s * 0.46 / 20)
+        pen = QPen(QColor(T["text"]), 1.7); pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen); p.setBrush(Qt.BrushStyle.NoBrush); p.drawPath(_icon_path(self.icon))
 
 
 class Ring(QWidget):
@@ -566,131 +717,128 @@ class Page(QWidget):
         clear(self.lay); self.build(); self.lay.addStretch()
 
 
+def _bento() -> QGridLayout:
+    g = QGridLayout(); g.setSpacing(16); g.setContentsMargins(0, 0, 0, 0)
+    for c in range(6):
+        g.setColumnStretch(c, 1); g.setColumnMinimumWidth(c, 40)
+    return g
+
+
+def _held_count(data) -> int:
+    return sum(1 for i in data.inbox() if i.get("decision") in ("HOLD", "BATCH"))
+
+
 class FocusPage(Page):
     def build(self):
         d = self.data.focus()
-        name, icon, color = ACTIVITY.get(d["activity"], ACTIVITY["idle"])
+        name = ACTIVITY.get(d["activity"], ACTIVITY["idle"])[0]
+        g = _bento()
 
-        hero, h = card(22)
-        row = QHBoxLayout(); row.setSpacing(26)
-        row.addWidget(Ring(d["focus_score"], color))
-        col = QVBoxLayout(); col.setSpacing(6)
-        col.addStretch()
-        col.addWidget(label("Right now", 12, QFont.Weight.DemiBold, T["text2"], caps=True))
-        t = QHBoxLayout(); t.setSpacing(10)
-        t.addWidget(Icon(icon, color, 34, 1.5, tile=True))
-        t.addWidget(label(name, 30, QFont.Weight.DemiBold, display=True)); t.addStretch()
-        col.addLayout(t)
-        meta = QHBoxLayout(); meta.setSpacing(6)
-        if d["repo"]:
-            meta.addWidget(Icon("folder", T["text2"], 15, 1.6))
-            meta.addWidget(label(d["repo"], 13, color=T["text2"]))
-            meta.addSpacing(8)
-        if d["branch"]:
-            meta.addWidget(Icon("branch", T["text2"], 15, 1.6))
-            meta.addWidget(label(d["branch"], 13, color=T["text2"]))
-        if not (d["repo"] or d["branch"]):
-            meta.addWidget(label("No repository detected yet", 13, color=T["text2"]))
-        meta.addStretch()
-        col.addLayout(meta)
-        tags = QHBoxLayout(); tags.setSpacing(6)
-        deep = d["focus_score"] >= 60
-        tags.addWidget(capsule("Deep focus" if deep else "Shallow focus",
-                               SYS["green"] if deep else SYS["orange"]))
-        if d["deep_minutes"]:
-            tags.addWidget(capsule(f"{d['deep_minutes']} min streak", SYS["teal"]))
-        tags.addStretch()
-        col.addSpacing(4); col.addLayout(tags); col.addStretch()
+        # Hero — focus score
+        hero = HatchCard()
+        hero.lay.addWidget(capsule("Focus score", on_primary=True))
+        hero.lay.addSpacing(10)
+        hero.lay.addWidget(big(str(d["focus_score"]), 88, T["on_primary"]))
+        hero.lay.addStretch()
+        where = " · ".join(x for x in (d["repo"], d["branch"]) if x)
+        desc = f"{name}" + (f" in {where}" if where else "") + \
+               (f". {d['deep_minutes']} minute streak." if d["deep_minutes"] else ".")
+        hero.lay.addWidget(label(desc, 14, color=T["on_primary2"], wrap=True))
+        hero.setMinimumHeight(300)
+        g.addWidget(hero, 0, 0, 2, 3)
+
+        # Trend — sparkline
+        tr, tl = muted_card(28)
+        row = QHBoxLayout()
+        col = QVBoxLayout(); col.setSpacing(4)
+        col.addWidget(overline("Last 10 minutes"))
+        col.addWidget(big("Deep focus" if d["focus_score"] >= 60 else "Shallow", 30))
+        row.addLayout(col); row.addStretch()
+        row.addWidget(Bars(d["timeline"][-11:] or [0], height=40), 0, Qt.AlignmentFlag.AlignBottom)
+        tl.addLayout(row)
+        g.addWidget(tr, 0, 3, 1, 3)
+
+        # Held interruptions
+        hc, hl = card(20, 2)
+        n = big(str(_held_count(self.data)), 30); n.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        k = overline("Held"); k.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hl.addStretch(); hl.addWidget(n); hl.addWidget(k); hl.addStretch()
+        g.addWidget(hc, 1, 3, 1, 1)
+
+        # Where was I
+        wc, wl = muted_card(24)
+        row = QHBoxLayout(); row.setSpacing(16)
+        row.addWidget(Badge("compass"), 0, Qt.AlignmentFlag.AlignVCenter)
+        col = QVBoxLayout(); col.setSpacing(3)
+        where_txt = (d["where"] or "").split(" (")[0]
+        act, _, place = where_txt.partition(" in ")
+        head = (act or "Nothing saved yet").split(" on ")[0]
+        col.addWidget(label(head[:1].upper() + head[1:], 16, QFont.Weight.Medium))
+        sub = f"{place.replace('@', ' · ')} · {d['where_ago']}" if place else (
+              f"Saved {d['where_ago']}" if d["where"] else "Saved when you're interrupted")
+        sl0 = label(sub, 12, QFont.Weight.DemiBold, T["text3"], wrap=True)
+        sl0.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        col.addWidget(sl0)
         row.addLayout(col, 1)
-        h.addLayout(row)
-        self.lay.addWidget(hero)
+        wl.addLayout(row)
+        g.addWidget(wc, 1, 4, 1, 2)
+        self.lay.addLayout(g)
 
-        grid = QHBoxLayout(); grid.setSpacing(16)
-        w, wl = card()
-        wl.addLayout(caption("compass", "Where was I", SYS["blue"]))
-        if d["where"]:
-            wl.addWidget(label(d["where"], 15, QFont.Weight.DemiBold, wrap=True))
-            wl.addWidget(label(f"Saved {d['where_ago']}  ·  {d['anchor']}", 12, color=T["text3"], wrap=True))
-        else:
-            wl.addWidget(label("Nothing saved yet. Your spot is captured automatically when an "
-                               "interruption pulls you out of deep focus.", 13, color=T["text2"], wrap=True))
-        wl.addStretch()
-        n, nl = card()
-        nl.addLayout(caption("pencil", "Next step", SYS["orange"]))
+        # Second band: note + since you left
+        g2 = _bento()
+        nc, nl = card(26, 10)
+        nl.addWidget(overline("Next step"))
         self.note = NoteEdit(d["next_step"], self._save_note)
         self.note.setPlaceholderText("What's your next step?  Enter to save")
-        self.note.setFont(font(15, QFont.Weight.DemiBold))
-        self.note.setFixedHeight(72)
+        self.note.setFont(font(17, QFont.Weight.Normal, display=True))
+        self.note.setFixedHeight(76)
         self.note.setStyleSheet(
-            f"QPlainTextEdit {{ background: transparent; border: none; border-bottom: 1px solid {T['line']};"
-            f"padding: 2px 0; color: {T['text']}; }}"
-            f"QPlainTextEdit:focus {{ border-bottom: 2px solid {SYS['orange']}; }}")
+            f"QPlainTextEdit {{ background: transparent; border: none; padding: 0; color: {T['text']}; }}")
         self.note_hint = label("", 11.5, color=T["text3"])
         nl.addWidget(self.note); nl.addWidget(self.note_hint)
-        nl.addStretch()
-        grid.addWidget(w, 3); grid.addWidget(n, 2)
-        self.lay.addLayout(grid)
+        g2.addWidget(nc, 0, 0, 1, 3)
 
-        grid2 = QHBoxLayout(); grid2.setSpacing(16)
         rw = d.get("rewind") or {}
-        r, rl = card()
-        rl.addLayout(caption("rewind", "Since you left · cognitive rewind", SYS["teal"]))
-        lines = []
-        if rw.get("last_ide_file"):
-            lines.append(("code", rw["last_ide_file"]))
-        lines += [("pencil", f) for f in rw.get("changed_files", [])]
-        lines += [("book", u.split("://", 1)[-1][:60]) for u in rw.get("browser_tabs", [])]
+        sc, sl_ = card(26, 8)
+        sl_.addWidget(overline("Since you left"))
+        lines = ([rw["last_ide_file"]] if rw.get("last_ide_file") else []) + list(rw.get("changed_files", []))
+        lines = list(dict.fromkeys(lines))[:3] + [u.split("://", 1)[-1][:56] for u in rw.get("browser_tabs", [])][:2]
         if not lines:
-            rl.addWidget(label("Your files, changes and relevant tabs from the last 30 minutes "
-                               "will show up here.", 13, color=T["text2"], wrap=True))
-        for ic, txt in lines[:6]:
-            row_ = QHBoxLayout(); row_.setSpacing(8)
-            row_.addWidget(Icon(ic, T["text3"], 14, 1.6))
-            row_.addWidget(label(txt, 12.5, color=T["text2"])); row_.addStretch()
-            rl.addLayout(row_)
-        rl.addStretch()
+            sl_.addWidget(label("Files and tabs from the last 30 minutes appear here.", 13, color=T["text3"], wrap=True))
+        for txt in lines:
+            sl_.addWidget(label(txt, 13.5, color=T["text2"]))
+        sl_.addStretch()
+        g2.addWidget(sc, 0, 3, 1, 3)
+        self.lay.addLayout(g2)
+
+        # Third band: radar (only when configured) + quick commands
         rd = d.get("radar") or {}
-        b, bl = card()
-        bl.addLayout(caption("radar", "Blocker radar", SYS["green"]))
-        if rd:
-            ci = rd.get("ci", "unknown")
-            ci_col = {"pass": SYS["green"], "fail": SYS["red"], "pending": SYS["orange"]}.get(ci, SYS["gray"])
-            for k, v, col in (("CI", {"pass": "Passing", "fail": "Failing", "pending": "Running"}.get(ci, "Unknown"), ci_col),
-                              ("Reviews", f"{rd.get('prs', 0)} waiting", SYS["blue"] if rd.get("prs") else SYS["gray"]),
-                              ("Behind main", f"{rd.get('behind', 0)} commit{'' if rd.get('behind', 0) == 1 else 's'}",
-                               SYS["orange"] if rd.get("behind", 0) > 10 else SYS["gray"])):
-                row_ = QHBoxLayout()
-                row_.addWidget(label(k, 13, color=T["text2"])); row_.addStretch()
-                row_.addWidget(capsule(v, col))
-                bl.addLayout(row_)
-        else:
-            bl.addWidget(label("Add GITHUB_TOKEN and GITHUB_REPO to .env to see CI, reviews and "
-                               "branch health here.", 13, color=T["text2"], wrap=True))
-        bl.addStretch()
-        grid2.addWidget(r, 3); grid2.addWidget(b, 2)
-        self.lay.addLayout(grid2)
-
-        c, cl = card(spacing=12)
-        cl.addLayout(caption("chart", "Focus · last 10 minutes", SYS["indigo"]))
-        cl.addWidget(AreaChart(d["timeline"] or [0, 0], color))
-        self.lay.addWidget(c)
-
         pal = d.get("palette") or []
-        if pal:
-            q, ql = card(spacing=12)
-            ql.addLayout(caption("terminal", "Quick commands · terminal palette", SYS["orange"]))
-            row_ = QHBoxLayout(); row_.setSpacing(8)
-            for i, slot in enumerate(pal[:6]):
-                btn = QPushButton(slot.get("label", f"Slot {i}"))
-                btn.setFont(font(12.5, QFont.Weight.DemiBold))
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setToolTip(slot.get("cmd", ""))
-                btn.setStyleSheet(f"QPushButton {{ background: {T['sel']}; border-radius: 10px; padding: 8px 0; }}"
-                                  f"QPushButton:hover {{ background: {T['hover']}; color: {SYS['blue']}; }}")
-                btn.clicked.connect(lambda _, k=i: self.data.run_palette(k))
-                row_.addWidget(btn, 1)
-            ql.addLayout(row_)
-            self.lay.addWidget(q)
+        if rd or pal:
+            g3 = _bento()
+            col0 = 0
+            if rd:
+                ci = {"pass": "Passing", "fail": "Failing", "pending": "Running"}.get(rd.get("ci"), "Unknown")
+                rc, rl = card(24, 2)
+                rl.addWidget(overline("CI"))
+                rl.addWidget(big(ci, 24, SYS["red"] if rd.get("ci") == "fail" else T["text"]))
+                prs, behind = rd.get("prs", 0), rd.get("behind", 0)
+                rl.addWidget(label(f"{prs} review{'s' if prs != 1 else ''} · {behind} behind main", 12.5,
+                                   color=T["text3"]))
+                g3.addWidget(rc, 0, 0, 1, 2); col0 = 2
+            if pal:
+                qc, ql = card(24, 12)
+                ql.addWidget(overline("Quick commands"))
+                row = QHBoxLayout(); row.setSpacing(8)
+                for i, slot in enumerate(pal[:6]):
+                    btn = QPushButton(slot.get("label", f"Slot {i}")); btn.setObjectName("chipbtn")
+                    btn.setFont(font(12.5, QFont.Weight.Medium))
+                    btn.setCursor(Qt.CursorShape.PointingHandCursor); btn.setToolTip(slot.get("cmd", ""))
+                    btn.clicked.connect(lambda _, k=i: self.data.run_palette(k))
+                    row.addWidget(btn, 1)
+                ql.addLayout(row)
+                g3.addWidget(qc, 0, col0, 1, 6 - col0)
+            self.lay.addLayout(g3)
 
 
 class NoteEdit(QPlainTextEdit):
@@ -780,7 +928,7 @@ class InboxPage(QWidget):
         shown = [i for i in self.items if self.flt == "ALL" or i.get("priority") == self.flt]
         if not shown:
             self.list.addSpacing(80)
-            ic = Icon("sparkle", SYS["blue"], 44, 1.4, tile=True)
+            ic = Badge("sparkle", 52)
             r = QHBoxLayout(); r.addStretch(); r.addWidget(ic); r.addStretch()
             self.list.addLayout(r)
             for txt, px, wt, col in (("You're all caught up", 20, QFont.Weight.DemiBold, None),
@@ -794,41 +942,33 @@ class InboxPage(QWidget):
 
     def make_card(self, it: dict) -> QFrame:
         pr = it.get("priority", "MEDIUM")
-        f, lay = card(16, 4)
-        row = QHBoxLayout(); row.setSpacing(14); row.setAlignment(Qt.AlignmentFlag.AlignTop)
-        icon, tint = SOURCE.get(it.get("source", ""), ("bubble", SYS["gray"]))
-        row.addWidget(Icon(icon, tint, 38, 1.6, tile=True), 0, Qt.AlignmentFlag.AlignTop)
-        col = QVBoxLayout(); col.setSpacing(3)
+        f, lay = card(22, 6)
         top = QHBoxLayout(); top.setSpacing(8)
+        top.addWidget(Dot(PRIORITY.get(pr, T["text3"])), 0, Qt.AlignmentFlag.AlignVCenter)
         src = (it.get("source") or "manual").title()
-        who = it.get("sender") and f"  ·  {it['sender']}" or ""
-        top.addWidget(label(f"{src}{who}", 12, QFont.Weight.DemiBold, T["text2"]))
+        who = f"  ·  {it['sender']}" if it.get("sender") else ""
+        top.addWidget(overline(f"{pr.title()}  ·  {src}{who}", SYS["red"] if pr == "HIGH" else None))
         top.addStretch()
         top.addWidget(label(_ago(it.get("arrived_at")), 12, color=T["text3"]))
-        col.addLayout(top)
-        col.addWidget(label(it.get("title") or "(no title)", 15, QFont.Weight.DemiBold, wrap=True))
+        lay.addLayout(top)
+        lay.addSpacing(2)
+        lay.addWidget(label(it.get("title") or "(no title)", 16, QFont.Weight.Medium, wrap=True))
         body = (it.get("body") or "").strip()
         if body:
-            col.addWidget(label(body[:220] + ("…" if len(body) > 220 else ""), 13, color=T["text2"], wrap=True))
-        bot = QHBoxLayout(); bot.setSpacing(6); bot.setContentsMargins(0, 6, 0, 0)
-        bot.addWidget(capsule(pr.title(), PRIORITY.get(pr, SYS["gray"])))
-        why = {"HOLD": ("Held for a break", SYS["teal"]), "BATCH": ("In digest", SYS["gray"]),
-               "DELIVER": ("Delivered", SYS["green"])}.get(it.get("decision", ""))
-        if why:
-            bot.addWidget(capsule(*why))
+            lay.addWidget(label(body[:220] + ("…" if len(body) > 220 else ""), 13.5, color=T["text2"], wrap=True))
+        bot = QHBoxLayout(); bot.setSpacing(6); bot.setContentsMargins(0, 8, 0, 0)
+        why = {"HOLD": "Held until your next break", "BATCH": "Saved for your digest",
+               "DELIVER": "Let through"}.get(it.get("decision", ""), "")
+        bot.addWidget(label(why, 12.5, color=T["text3"]))
         bot.addStretch()
         if it.get("url"):
             o = QPushButton("Open"); o.setObjectName("pill"); o.setFont(font(12.5, QFont.Weight.DemiBold))
-            o.setStyleSheet(f"QPushButton {{ background: {SYS['blue']}; color: white; border-radius: 13px;"
-                            "padding: 5px 16px; } QPushButton:hover { background: #409cff; }")
             o.setCursor(Qt.CursorShape.PointingHandCursor)
             o.clicked.connect(lambda _, u=it["url"]: open_url(u)); bot.addWidget(o)
-        d = QPushButton("Done"); d.setObjectName("link"); d.setFont(font(13, QFont.Weight.DemiBold))
+        d = QPushButton("Done"); d.setObjectName("quiet"); d.setFont(font(13, QFont.Weight.DemiBold))
         d.setCursor(Qt.CursorShape.PointingHandCursor)
         d.clicked.connect(lambda _, i=it["id"]: self.dismiss(i)); bot.addWidget(d)
-        col.addLayout(bot)
-        row.addLayout(col, 1)
-        lay.addLayout(row)
+        lay.addLayout(bot)
         return f
 
     def dismiss(self, nid: str):
@@ -848,70 +988,103 @@ class InboxPage(QWidget):
 class InsightsPage(Page):
     def build(self):
         d = self.data.insights()
-        tiles = QHBoxLayout(); tiles.setSpacing(16)
+        g = _bento()
         m = d["deep_minutes"]
-        for icon, title, value, color in [
-            ("target", "Deep work · 7 days", f"{m // 60}h {m % 60}m", SYS["blue"]),
-            ("lock", "Interruptions held", str(d["held"]), SYS["teal"]),
-            ("bubble", "Let through", str(d["delivered"]), SYS["green"]),
-        ]:
-            f, l = card(18, 10)
-            l.addLayout(caption(icon, title, color))
-            l.addWidget(label(value, 32, QFont.Weight.DemiBold, color, display=True))
-            tiles.addWidget(f)
-        self.lay.addLayout(tiles)
-
-        f, l = card(spacing=12)
-        l.addLayout(caption("clock", "When you focus best", SYS["indigo"]))
         best = d.get("best_hours") or []
-        if best:
-            nice = [f"{(int(b[:2]) % 12) or 12} {'AM' if int(b[:2]) < 12 else 'PM'}" for b in best]
-            l.addWidget(label(", ".join(nice), 20, QFont.Weight.DemiBold, display=True))
-        else:
-            l.addWidget(label("Collecting data. Check back after a day of work.", 13, color=T["text2"]))
-        hours = d.get("hours") or {}
-        if hours:
-            l.addWidget(HourBars(hours, {int(b[:2]) for b in best}))
-        self.lay.addWidget(f)
+        nice = [f"{(int(b[:2]) % 12) or 12} {'AM' if int(b[:2]) < 12 else 'PM'}" for b in best]
 
-        f, l = card(spacing=12)
-        l.addLayout(caption("tray", "Who interrupts you", SYS["purple"]))
+        hero = HatchCard()
+        hero.lay.addWidget(capsule("Deep work · 7 days", on_primary=True))
+        hero.lay.addSpacing(10)
+        hero.lay.addWidget(big(f"{m // 60}h {m % 60:02d}m", 64, T["on_primary"]))
+        hero.lay.addStretch()
+        hero.lay.addWidget(label(("You focus best around " + ", ".join(nice) + ".") if nice
+                                 else "Keep working — your focus pattern appears after a day.",
+                                 14, color=T["on_primary2"], wrap=True))
+        hero.setMinimumHeight(300)
+        g.addWidget(hero, 0, 0, 2, 3)
+
+        hc, hl = muted_card(28)
+        row = QHBoxLayout()
+        col = QVBoxLayout(); col.setSpacing(4)
+        col.addWidget(overline("Interruptions held"))
+        col.addWidget(big(str(d["held"]), 34))
+        row.addLayout(col); row.addStretch()
+        hours = list((d.get("hours") or {}).values())[-11:]
+        if hours:
+            row.addWidget(Bars(hours, height=40), 0, Qt.AlignmentFlag.AlignBottom)
+        hl.addLayout(row)
+        g.addWidget(hc, 0, 3, 1, 3)
+
+        lc, ll = card(20, 2)
+        n = big(str(d["delivered"]), 30); n.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        k = overline("Let through"); k.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ll.addStretch(); ll.addWidget(n); ll.addWidget(k); ll.addStretch()
+        g.addWidget(lc, 1, 3, 1, 1)
+
         ints = d.get("interruptions") or {}
-        if not ints:
-            l.addWidget(label("No interruptions recorded yet.", 13, color=T["text2"]))
-        top = max(ints.values()) if ints else 1
-        for src, n in ints.items():
-            icon, tint = SOURCE.get(src, ("bubble", SYS["gray"]))
-            r = QHBoxLayout(); r.setSpacing(12)
-            r.addWidget(Icon(icon, tint, 28, 1.6, tile=True))
-            r.addWidget(label(src.title(), 14, QFont.Weight.Medium))
-            r.addStretch()
-            bar = Meter(n / top, tint); r.addWidget(bar)
-            r.addWidget(label(str(n), 14, QFont.Weight.DemiBold, T["text2"]))
-            l.addLayout(r)
-        self.lay.addWidget(f)
-        foot = QHBoxLayout(); foot.setSpacing(6)
-        foot.addWidget(Icon("lock", T["text3"], 13, 1.6))
-        foot.addWidget(label("Computed and stored on this PC only. Nothing leaves your machine.", 12, color=T["text3"]))
-        foot.addStretch()
-        self.lay.addLayout(foot)
+        tc, tl = muted_card(24)
+        row = QHBoxLayout(); row.setSpacing(16)
+        row.addWidget(Badge("tray"), 0, Qt.AlignmentFlag.AlignVCenter)
+        col = QVBoxLayout(); col.setSpacing(3)
+        if ints:
+            src, cnt = next(iter(ints.items()))
+            col.addWidget(label(f"{src.title()} · {cnt} of {sum(ints.values())}", 14, QFont.Weight.Medium))
+            col.addWidget(label("Top source", 12, QFont.Weight.DemiBold, T["text3"]))
+        else:
+            col.addWidget(label("No interruptions yet", 14, QFont.Weight.Medium))
+            col.addWidget(label("Sources appear as they arrive", 12, QFont.Weight.DemiBold, T["text3"]))
+        row.addLayout(col, 1)
+        tl.addLayout(row)
+        g.addWidget(tc, 1, 4, 1, 2)
+        self.lay.addLayout(g)
+
+        if len(ints) > 1:
+            f, l = card(26, 12)
+            l.addWidget(overline("Who interrupts you"))
+            top = max(ints.values())
+            for src, cnt in ints.items():
+                r = QHBoxLayout(); r.setSpacing(12)
+                r.addWidget(label(src.title(), 14, color=T["text2"]))
+                r.addStretch()
+                r.addWidget(Meter(cnt / top, T["text"]))
+                r.addWidget(label(str(cnt), 14, color=T["text3"]))
+                l.addLayout(r)
+            self.lay.addWidget(f)
+        foot = label("Computed and stored on this PC only. Nothing leaves your machine.", 12, color=T["text3"])
+        self.lay.addWidget(foot)
+
+
+class Dot(QWidget):
+    def __init__(self, color: str, size: int = 7):
+        super().__init__()
+        self.color = QColor(color); self.setFixedSize(size, size)
+
+    def paintEvent(self, _):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(self.color); p.drawEllipse(QRectF(self.rect()))
 
 
 class Meter(QWidget):
     def __init__(self, frac: float, color: str):
         super().__init__()
         self.frac, self.color = max(0.04, min(1, frac)), QColor(color)
-        self.setFixedSize(220, 8)
+        self.setFixedSize(160, 6)
 
     def paintEvent(self, _):
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(T["track"])
-        p.drawRoundedRect(QRectF(0, 0, self.width(), 8), 4, 4)
+        p.drawRoundedRect(QRectF(0, 0, self.width(), 6), 3, 3)
         p.setBrush(self.color)
-        p.drawRoundedRect(QRectF(0, 0, self.width() * self.frac, 8), 4, 4)
+        p.drawRoundedRect(QRectF(0, 0, self.width() * self.frac, 6), 3, 3)
 
 
 # ── Window ────────────────────────────────────────────────────────────────────
+# Hidden this long → exit to give memory back (DEEPWORKAI_UI_KEEPALIVE_MIN, 0 = never).
+import os as _os
+KEEPALIVE_S = float(_os.environ.get("DEEPWORKAI_UI_KEEPALIVE_MIN", "20")) * 60 or float("inf")
+
+
 class Hub(QWidget):
     TABS = [("focus", "Focus", "target"), ("timeline", "Time Travel", "rewind"),
             ("inbox", "Inbox", "tray"), ("insights", "Insights", "chart")]
@@ -921,6 +1094,7 @@ class Hub(QWidget):
                  persistent: bool = False, demo_index: int | None = None):
         super().__init__()
         self.persistent = persistent
+        self._hidden_since = time.time()
         self._by_dial = False
         self._cmd_mtime = 0.0
         self.setWindowTitle("Deep Work AI")
@@ -940,7 +1114,7 @@ class Hub(QWidget):
         side = QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(216)
         sl = QVBoxLayout(side); sl.setContentsMargins(14, 22, 14, 18); sl.setSpacing(2)
         brand = QHBoxLayout(); brand.setSpacing(10); brand.setContentsMargins(6, 0, 0, 0)
-        brand.addWidget(Icon("sparkle", SYS["blue"], 30, 1.5, tile=True))
+        brand.addWidget(Badge("sparkle", 32))
         bt = QVBoxLayout(); bt.setSpacing(0)
         bt.addWidget(label("Deep Work", 15, QFont.Weight.Bold, display=True))
         bt.addWidget(label("Focus OS", 11.5, color=T["text3"]))
@@ -964,7 +1138,7 @@ class Hub(QWidget):
             sl.addWidget(b); self.navs[key] = b; self.stack.addWidget(self.pages[key])
         sl.addStretch()
         lk = QHBoxLayout(); lk.setSpacing(6); lk.setContentsMargins(8, 0, 0, 0)
-        lk.addWidget(Icon("lock", SYS["green"], 13, 1.7))
+        lk.addWidget(Icon("lock", T["text3"], 13, 1.7))
         lk.addWidget(label("On-device · Offline", 11.5, QFont.Weight.Medium, T["text3"])); lk.addStretch()
         sl.addLayout(lk)
         body.addWidget(side)
@@ -977,8 +1151,8 @@ class Hub(QWidget):
         tl.addWidget(self.clock); tl.addWidget(self.title)
         head.addLayout(tl); head.addStretch()
         x = QPushButton(); x.setFixedSize(28, 28); x.setCursor(Qt.CursorShape.PointingHandCursor)
-        x.setStyleSheet(f"QPushButton {{ background: {T['sel']}; border-radius: 14px; }}"
-                        f"QPushButton:hover {{ background: {SYS['red']}; }}")
+        x.setStyleSheet(f"QPushButton {{ background: {T['muted']}; border-radius: 14px; }}"
+                        f"QPushButton:hover {{ background: {T['line']}; }}")
         xi = Icon("close", T["text2"], 16, 1.8); xi.setParent(x); xi.move(6, 6)
         x.clicked.connect(self.close)
         head.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
@@ -1034,6 +1208,10 @@ class Hub(QWidget):
 
     def _fast(self):
         self._read_cmd()
+        if self.persistent and self.isHidden() and not self.pages["timeline"].dial_active():
+            if time.time() - self._hidden_since > KEEPALIVE_S:
+                QApplication.quit()       # free ~70 MB; the service restarts us on demand
+                return
         tl = self.pages["timeline"]
         if self.isVisible() or tl.dial_active():
             tl.poll()
@@ -1042,6 +1220,10 @@ class Hub(QWidget):
         if self._by_dial:                 # the dial opened us — get out of the way
             self._by_dial = False
             self.hide()
+
+    def hideEvent(self, e):
+        self._hidden_since = time.time()
+        super().hideEvent(e)
 
     def closeEvent(self, e):
         if self.persistent:
@@ -1065,7 +1247,7 @@ class Hub(QWidget):
             page.refresh()                # fresh data whenever a page is opened
         for k, b in self.navs.items():
             b.setChecked(k == key)
-            self.nav_icons[k].color = QColor(SYS["blue"] if k == key else T["text2"])
+            self.nav_icons[k].color = QColor(T["text"] if k == key else T["text3"])
             self.nav_icons[k].update()
         self.stack.setCurrentWidget(self.pages[key])
         self.title.setText(dict((k, t) for k, t, _ in self.TABS)[key])
@@ -1114,6 +1296,7 @@ def _apply_theme(mode: str, app: QApplication):
         except AttributeError:
             dark = True
     T.clear(); T.update(DARK if dark else LIGHT)
+    _apply_accents(); _resolve_palette()
 
 
 def main(argv=None):
