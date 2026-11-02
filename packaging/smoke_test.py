@@ -54,6 +54,9 @@ try:
         r = send(f"@{key} {cmd}")
         assert r.startswith("OK"), f"{cmd}: {r[:120]}"
     print("ok  core commands")
+    log_text = (home / "data" / "service.log").read_text(errors="ignore")   # must stay readable
+    assert "smoke test" not in log_text, "journal text leaked into service.log"
+    print("ok  service.log readable, no private text")
     print("PASS")
 finally:
     proc.terminate()
