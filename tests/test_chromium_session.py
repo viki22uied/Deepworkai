@@ -101,3 +101,15 @@ def test_firefox_session_decoded(tmp_path, monkeypatch):
     f.parent.mkdir(parents=True); f.write_bytes(magic + raw)
     monkeypatch.setitem(core._BROWSER_SESSION_PATHS, "firefox.exe", tmp_path)
     assert core._firefox_tabs() == [{"url": "https://github.com/me", "title": "https://github.com/me"}]
+
+
+def test_closed_browser_that_reopens_its_session_gets_only_missing_tabs(monkeypatch):
+    import deep_restore_core as core
+    launched = []
+    monkeypatch.setattr(core, "find_exe", lambda n: "brave")
+    monkeypatch.setattr(core.psutil, "process_iter", lambda *a, **k: [])          # not running
+    monkeypatch.setattr(core, "_read_browser_tabs", lambda b: ([{"url": "https://a.example/"}], []))
+    monkeypatch.setattr(core, "_browser_restored_itself", lambda b: True)
+    monkeypatch.setattr(core.subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+    core.launch_browser("brave.exe", ["https://a.example/", "https://b.example/"])
+    assert launched == [["brave"], ["brave", "https://b.example/"]]   # a.example came back by itself

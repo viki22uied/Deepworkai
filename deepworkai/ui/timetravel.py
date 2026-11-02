@@ -68,6 +68,21 @@ def _when(ts: str) -> tuple[str, str]:
     return clock, ago
 
 
+def _window_lines(windows: list) -> list[str]:
+    """'Brave · YouTube', 'Code · app.py - my-repo' — one line per open window."""
+    out = []
+    for w in windows:
+        app = (w.get("process") or "").removesuffix(".exe").removesuffix(".EXE")
+        app = app[:1].upper() + app[1:]
+        title = (w.get("title") or "").strip()
+        if app.lower() in ("deepworkai", "explorer") and title == "Program Manager":
+            continue                                    # the desktop, not a window you opened
+        line = f"{app} · {title[:48]}" if title else app
+        if line not in out:
+            out.append(line)
+    return out
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -110,6 +125,14 @@ class Moments:
         git = snap.get("git") or {}
         tabs = [t.get("url", "") if isinstance(t, dict) else str(t)
                 for v in (snap.get("browsers") or {}).values() for t in v]
+        try:                                   # tabs locked at save time: readable once the browser closed
+            from deepworkai.service.deep_restore_core import _tabs_from_session_file
+            for files in (snap.get("pending_tabs") or {}).values():
+                for e in files if isinstance(files, list) else [files]:
+                    f, size = (e["file"], e.get("size")) if isinstance(e, dict) else (e, None)
+                    tabs += [t["url"] for t in (_tabs_from_session_file(f, size) or [])]
+        except Exception:
+            pass
         apps = sorted({w.get("process", "").replace(".exe", "").title()
                        for w in snap.get("windows", []) if w.get("process")})
         activity, focus = ctx.get("activity"), ctx.get("focus_score")
@@ -127,6 +150,7 @@ class Moments:
             "changed": (ctx.get("changed_files") or git.get("changed_files") or [])[:4],
             "tabs": [_domain(u) for u in (tabs or ctx.get("tabs") or [])][:4],
             "n_tabs": len(tabs), "apps": apps[:6], "n_windows": len(snap.get("windows", [])),
+            "windows": _window_lines(snap.get("windows", []))[:8],
             "note": ctx.get("next_step") or "",
         }
 
@@ -372,6 +396,16 @@ class TimelinePage(QWidget):
             self.dl.addWidget(capsule("Time travel", on_primary=True))
             self.dl.addSpacing(8)
             self.dl.addWidget(big("Now", 76, P))
+            try:                                   # live: what's open right now
+                from deepworkai.service.deep_restore_core import enum_windows
+                now = _window_lines(enum_windows())[:8]
+            except Exception:
+                now = []
+            if now:
+                self.dl.addSpacing(4)
+                self.dl.addWidget(overline("Open right now", P2))
+                for ln in now:
+                    self.dl.addWidget(label(ln, 14, color=P, wrap=True))
             self.dl.addStretch()
             self.dl.addWidget(label(
                 "Turn the dial left, scroll, or press ↓ to walk back through your day. "
@@ -420,13 +454,8 @@ class TimelinePage(QWidget):
                 self.dl.addWidget(label(ln, 14, color=P, wrap=True))
 
         section("Your note", [m["note"]] if m.get("note") else [])
-        changed = m.get("changed", [])
-        own = m.get("file")
-        files = ([own] if own and not any(c.endswith(own) for c in changed) else []) + changed
-        section("Files", files[:4])
+        section("Open windows", m.get("windows") or ([", ".join(m["apps"])] if m.get("apps") else []))
         section("Tabs", m.get("tabs", []))
-        if not (m.get("note") or files or m.get("tabs")) and m.get("apps"):
-            section("Open apps", [", ".join(m["apps"])])
         self.dl.addStretch()
 
     def _finish(self, st):

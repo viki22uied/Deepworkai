@@ -749,8 +749,29 @@ def get_recent_snapshots(limit: int = 10) -> list[dict]:
 # ── App Launch ────────────────────────────────────────────────────────────────
 def _get_currently_open_urls(browser_exe: str) -> set:
     """URLs open in the live browser session — used to avoid duplicate tabs."""
-    tabs, _locked = _read_browser_tabs(browser_exe)
-    return {t["url"].split("#")[0].rstrip("/") for t in tabs}
+    tabs, locked = _read_browser_tabs(browser_exe)
+    if locked and not tabs:
+        return None                                     # can't see them (locked): unknown
+    return {_norm(t["url"]) for t in tabs}
+
+
+def _norm(u: str) -> str:
+    return u.split("#")[0].rstrip("/")
+
+
+def _browser_restored_itself(browser_exe: str, timeout: float = 6.0) -> bool:
+    """After a bare launch: True if the browser reopened its own last session (not a blank New Tab)."""
+    deadline, seen = time.time() + timeout, 0.0
+    while time.time() < deadline:
+        titles = [c["title"] for c in _snapshot_hwnds().get(browser_exe, [])]
+        if titles:
+            seen = seen or time.time()
+            if any(t and not t.startswith("new tab") for t in titles):
+                return True
+            if time.time() - seen > 1.5:                # window has been a plain New Tab for a while
+                return False
+        time.sleep(0.15)
+    return False
 
 
 def launch_browser(browser_exe: str, tabs: list) -> bool:
@@ -780,14 +801,26 @@ def launch_browser(browser_exe: str, tabs: list) -> bool:
     # ── De-duplicate: only open tabs NOT already visible ────────────────────
     if browser_running:
         open_urls = _get_currently_open_urls(browser_lower)
-        urls_to_open = [
-            u for u in all_urls
-            if u.split("#")[0].rstrip("/") not in open_urls
-        ]
+        if open_urls is None:
+            # Locked: we can't tell which tabs are open. Opening them all is what duplicated
+            # every tab, so leave a running browser as it is.
+            log.info("[RESTORE] %s is running with its tabs locked — left as is", browser_exe)
+            return True
+        urls_to_open = [u for u in all_urls if _norm(u) not in open_urls]
         log.info("[RESTORE] %s: %d saved tabs, %d already open, %d to open",
                  browser_exe, len(all_urls), len(open_urls), len(urls_to_open))
     else:
-        urls_to_open = all_urls
+        # Start it bare first: many browsers reopen their own last session, and adding our
+        # tabs on top of that doubled every tab. Then open only what's still missing.
+        at_close = {_norm(t["url"]) for t in _read_browser_tabs(browser_lower)[0]}
+        subprocess.Popen([exe_path], creationflags=subprocess.CREATE_NO_WINDOW)
+        if _browser_restored_itself(browser_lower):
+            urls_to_open = [u for u in all_urls if _norm(u) not in at_close]
+            log.info("[RESTORE] %s reopened its own session; %d saved tabs still missing",
+                     browser_exe, len(urls_to_open))
+        else:
+            urls_to_open = all_urls
+        browser_running = True
 
     if not urls_to_open:
         log.info("[RESTORE] %s: all tabs already open — skipping", browser_exe)
