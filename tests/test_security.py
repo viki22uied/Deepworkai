@@ -135,3 +135,21 @@ def test_logs_never_contain_message_content(svc, server, tmp_path):
     text = " ".join(r.getMessage() for r in records)
     for leak in ("salary", "jane", "hr-bot", "private note"):
         assert leak not in text
+
+
+def test_github_repo_and_branch_are_validated(monkeypatch):
+    from deepworkai.features import blocker_radar as br
+    calls = []
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: calls.append(req.full_url) or (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr(br, "_cfg", lambda k: {"GITHUB_TOKEN": "t", "GITHUB_REPO": REPO[0]}.get(k, ""))
+    monkeypatch.delenv("DEEPWORKAI_OFFLINE", raising=False)
+    for bad in ("acme/../../user", "acme/api?x=1", "../orgs/x", "acme", "acme/api/extra"):
+        REPO[0] = bad
+        assert br._gh("pulls") is None
+    assert calls == []                                   # no request was even attempted
+    REPO[0] = "acme/api"
+    br._ci_status("feat/x?#..")
+    assert calls and calls[-1].endswith("/repos/acme/api/commits/feat%2Fx%3F%23../check-runs")
+
+
+REPO = ["acme/api"]

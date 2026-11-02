@@ -201,7 +201,7 @@ def get_open_browser_tabs() -> list[str]:
     """
     import urllib.request
     try:
-        with urllib.request.urlopen("http://localhost:9222/json", timeout=2) as r:
+        with urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=2) as r:  # nosec B310 - fixed loopback URL
             tabs = json.loads(r.read())
         return [
             t["url"] for t in tabs

@@ -273,7 +273,7 @@ def purge_old(days: int = RETENTION_DAYS):
     try:
         with _conn() as c:
             for t in ("state_log", "auto_context", "decisions"):
-                c.execute(f"DELETE FROM {t} WHERE ts < ?", (cutoff,))
+                c.execute(f"DELETE FROM {t} WHERE ts < ?", (cutoff,))  # nosec B608 - fixed table names
         if ACTIVITY_DB.exists():
             with sqlite3.connect(ACTIVITY_DB, timeout=5) as c:
                 c.execute("DELETE FROM events WHERE timestamp < ?", (cutoff,))
@@ -309,7 +309,8 @@ def record_feedback(sender: str, opened: bool):
     col = "opened" if opened else "ignored"
     with _conn() as c:
         c.execute("INSERT OR IGNORE INTO sender_weight(sender) VALUES (?)", (sender.lower(),))
-        c.execute(f"UPDATE sender_weight SET {col} = {col} + 1 WHERE sender=?", (sender.lower(),))
+        c.execute(f"UPDATE sender_weight SET {col} = {col} + 1 WHERE sender=?",  # nosec B608 - col is one
+                  (sender.lower(),))                                            # of two literals
 
 
 def decide(priority: str, confidence: float, state: WorkflowState,
