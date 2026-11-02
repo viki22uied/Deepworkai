@@ -34,17 +34,9 @@ def _is_debug_active() -> bool:
             return True
         except Exception:
             pass
-    # Method 2: powershell process check for node --inspect
-    try:
-        from deepworkai.service.proc_utils import run_hidden
-        r = run_hidden(
-            ["powershell", "-NonInteractive", "-NoProfile", "-Command",
-             "(Get-Process | Where-Object {$_.CommandLine -like '*--inspect*'} | Measure-Object).Count"],
-            timeout=3,
-        )
-        return r.stdout.strip() not in ("", "0")
-    except Exception:
-        return False
+    # (A PowerShell '--inspect' check used to run here every 3 s: ~1,200 hidden processes an
+    # hour, and Get-Process has no CommandLine on Windows PowerShell 5.1, so it never matched.)
+    return False
 
 
 def _watch_loop():
@@ -75,11 +67,23 @@ DEBUG_SHORTCUTS: dict[str, str | list] = {
 }
 
 
+def _editor_in_front() -> bool:
+    try:
+        import ctypes, psutil
+        pid = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(ctypes.windll.user32.GetForegroundWindow(), ctypes.byref(pid))
+        return psutil.Process(pid.value).name().lower() in ("code.exe", "cursor.exe", "code - insiders.exe")
+    except Exception:
+        return False
+
+
 def execute_debug_action(action: str) -> str:
     """Send the keyboard shortcut for a debug action to VS Code."""
     key = DEBUG_SHORTCUTS.get(action)
     if not key:
         return f"unknown action: {action}"
+    if not _editor_in_front():
+        return "editor not in front — keys not sent"      # never type F5/F10 into a browser
     try:
         import pyautogui
         pyautogui.FAILSAFE = False

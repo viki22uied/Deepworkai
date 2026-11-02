@@ -164,6 +164,8 @@ def test_restore_logs_no_window_titles(monkeypatch, caplog):
     monkeypatch.setattr(core, "enum_windows", lambda: [])
     monkeypatch.setattr(core, "_snapshot_hwnds", lambda: {"code.exe": [{"hwnd": 7, "title": "x"}]})
     monkeypatch.setattr(core, "reposition", lambda *a: None)
+    monkeypatch.setattr(core, "launch_app", lambda *a: False)            # never start real apps
+    monkeypatch.setattr(core.subprocess, "Popen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("launched")))
     with caplog.at_level(logging.DEBUG):
         core.restore_workspace({"windows": [{"process": "code.exe", "title": "secret-salary.xlsx - Code"}],
                                 "browsers": {}, "tabs_format": core.TABS_FORMAT})
