@@ -24,6 +24,13 @@ let _serviceSpawning = false;
 // ── Logging ──────────────────────────────────────────────────────────────────
 const LOG_FILE = path.resolve(__dirname, '..', 'debug.log');
 
+// Only command names and OK/ERROR outcomes are logged — results can contain
+// notes, file names or tab URLs, which must never land in a plain-text log.
+export function summarize(result) {
+  const s = String(result ?? '');
+  return s.split(' ').slice(0, 2).join(' ');
+}
+
 export function log(msg) {
   const ts = new Date().toISOString();
   const line = `[${ts}] ${msg}\n`;
@@ -232,7 +239,7 @@ export async function sendCommand(command) {
       if (result.startsWith('ERROR AUTH')) {
         log('[CMD] Rejected: session key missing or stale — is project_root correct in config.json?');
       }
-      log(`[CMD] ${command} → ${result}`);
+      log(`[CMD] ${command.split(':')[0]} → ${summarize(result)}`);
       return result;
     } catch (e) {
       log(`[CMD] Attempt ${attempt}/${MAX_RETRIES} failed: ${e.message}`);
