@@ -28,7 +28,7 @@ for (const action of ACTIONS) {
   pluginSDK.registerAction(action);
 }
 
-log(`[PLUGIN] Deep Work AI v3.2.0 — ${ACTIONS.length} actions (3 keys + dial)`);
+log(`[PLUGIN] Deep Work AI v4.0.0 — ${ACTIONS.length} actions (3 keys + dial)`);
 
 await pluginSDK.connect();
 
