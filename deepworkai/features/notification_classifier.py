@@ -138,6 +138,8 @@ _LOW_PATTERNS = [
         r"\b(standup\s+bot|daily\s+standup|scrum\s+bot)\b",
         r"\b(won.?t\s+fix|closed\s+as|duplicate|auto[-\s]closed|stale)\b",
         r"\b(new\s+emoji|team\s+lunch|happy\s+hour|optional|sign[-\s]up)\b",
+        r"^(dependabot|renovate|greenkeeper|snyk-bot|github-actions)\b",   # automated bump PRs
+        r"\bbump\s+\S+\s+from\s+\S+\s+to\s+\S+",
     ]
 ]
 

@@ -137,6 +137,14 @@ def load_recent_events(minutes: int = WINDOW_MINUTES, db: Path = ACTIVITY_DB) ->
             "SELECT timestamp, event_type, description, app, details FROM events "
             "WHERE timestamp >= ? ORDER BY timestamp ASC", (since,)
         ).fetchall()
+        # Git context is only logged when it changes — carry the latest one into
+        # the window so repo/branch don't vanish 20 minutes after a checkout.
+        last_git = conn.execute(
+            "SELECT timestamp, event_type, description, app, details FROM events "
+            "WHERE event_type='git_context' AND timestamp < ? ORDER BY timestamp DESC LIMIT 1",
+            (since,)).fetchone()
+        if last_git and not any(r["event_type"] == "git_context" for r in rows):
+            rows = [last_git] + list(rows)
         conn.close()
     except Exception as e:
         log.debug("activity read failed: %s", e)
@@ -216,7 +224,8 @@ def infer_state(events: list[dict], now: datetime | None = None,
             break
     st.deep_minutes = int((now - streak_start).total_seconds() // 60) if streak_start else 0
 
-    switch_penalty = 1.0 / (1.0 + math.exp(st.switches_per_10m - 6))      # ~1 when calm, →0 when frantic
+    # ~1 when calm, →0 when frantic. Exponent clamped: a burst of switches overflowed exp().
+    switch_penalty = 1.0 / (1.0 + math.exp(min(50.0, st.switches_per_10m - 6)))
     streak_bonus   = min(1.0, st.deep_minutes / 25.0)
     score = 100 * (0.45 * st.dev_share + 0.30 * switch_penalty + 0.25 * streak_bonus)
     if st.activity in ("communicating", "meeting"):
@@ -227,26 +236,35 @@ def infer_state(events: list[dict], now: datetime | None = None,
 
 
 # ── Intelligence DB (local) ──────────────────────────────────────────────────
+_schema_ready: set = set()
+
+
 def _conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(INTEL_DB, timeout=5)
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS state_log (
-            ts TEXT NOT NULL, activity TEXT, focus_score INTEGER, deep INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS auto_context (
-            ts TEXT NOT NULL, reason TEXT, activity TEXT, repo TEXT, branch TEXT,
-            anchor TEXT, summary TEXT
-        );
-        CREATE TABLE IF NOT EXISTS decisions (
-            ts TEXT NOT NULL, notif_id TEXT, source TEXT, sender TEXT, priority TEXT,
-            decision TEXT, focus_score INTEGER, released INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS sender_weight (
-            sender TEXT PRIMARY KEY, opened INTEGER DEFAULT 0, ignored INTEGER DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_state_ts ON state_log(ts);
-        CREATE INDEX IF NOT EXISTS idx_dec_rel ON decisions(released, decision);
-    """)
+    conn = sqlite3.connect(INTEL_DB, timeout=10)
+    key = str(INTEL_DB)
+    if key not in _schema_ready:              # create tables once per process, not per call
+        conn.execute("PRAGMA journal_mode=WAL")   # readers never block the writer
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS state_log (
+                ts TEXT NOT NULL, activity TEXT, focus_score INTEGER, deep INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS auto_context (
+                ts TEXT NOT NULL, reason TEXT, activity TEXT, repo TEXT, branch TEXT,
+                anchor TEXT, summary TEXT
+            );
+            CREATE TABLE IF NOT EXISTS decisions (
+                ts TEXT NOT NULL, notif_id TEXT, source TEXT, sender TEXT, priority TEXT,
+                decision TEXT, focus_score INTEGER, released INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS sender_weight (
+                sender TEXT PRIMARY KEY, opened INTEGER DEFAULT 0, ignored INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_state_ts ON state_log(ts);
+            CREATE INDEX IF NOT EXISTS idx_dec_rel ON decisions(released, decision);
+            CREATE INDEX IF NOT EXISTS idx_dec_ts ON decisions(ts);
+            CREATE INDEX IF NOT EXISTS idx_ctx_ts ON auto_context(ts);
+        """)
+        _schema_ready.add(key)
     return conn
 
 
