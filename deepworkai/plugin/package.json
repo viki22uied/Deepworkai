@@ -15,7 +15,7 @@
     "watch": "npm run clean && node esbuild.config.js --watch"
   },
   "author": "Deep Work AI",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
   },
