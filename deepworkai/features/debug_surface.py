@@ -4,7 +4,8 @@ Debug Control Surface
 Watches for an active VS Code debug session (port 4711).
 When detected: switches LCD to debug mode (Continue / Step Over / etc.).
 On debug end: restores previous LCD layout.
-Uses pyautogui to send keyboard shortcuts to VS Code.
+Sends keyboard shortcuts to VS Code with Windows' keybd_event (no pyautogui: it pulled
+OpenCV, NumPy and Pillow into the package, ~110 MB, for six key presses).
 """
 
 from __future__ import annotations
@@ -85,17 +86,25 @@ def execute_debug_action(action: str) -> str:
     if not _editor_in_front():
         return "editor not in front — keys not sent"      # never type F5/F10 into a browser
     try:
-        import pyautogui
-        pyautogui.FAILSAFE = False
-        if isinstance(key, list):
-            pyautogui.hotkey(*key)
-        else:
-            pyautogui.press(key)
+        _send_keys(key if isinstance(key, list) else [key])
         return f"sent {action} ({key})"
-    except ImportError:
-        return "pyautogui not installed — pip install pyautogui"
     except Exception as e:
         return f"failed: {e}"
+
+
+_VK = {"shift": 0x10, "f5": 0x74, "f9": 0x78, "f10": 0x79, "f11": 0x7A}
+
+
+def _send_keys(keys: list[str]):
+    """Press keys together (modifiers first), then release them in reverse order."""
+    import ctypes
+    KEYUP = 0x0002
+    user32 = ctypes.windll.user32
+    codes = [_VK[k] for k in keys]
+    for c in codes:
+        user32.keybd_event(c, 0, 0, 0)
+    for c in reversed(codes):
+        user32.keybd_event(c, 0, KEYUP, 0)
 
 
 def is_debug_active() -> bool:

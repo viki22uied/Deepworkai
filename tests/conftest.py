@@ -42,10 +42,9 @@ def _no_side_effects(monkeypatch):
     monkeypatch.setattr(webbrowser, "open", lambda *a, **k: (_ for _ in ()).throw(AssertionError("test opened a browser")))
     if hasattr(os, "startfile"):
         monkeypatch.setattr(os, "startfile", lambda *a, **k: (_ for _ in ()).throw(AssertionError("test opened a file")))
-    fake = types.ModuleType("pyautogui")              # stand-in: the real one would press keys
-    for f in ("press", "hotkey", "typewrite", "write", "click"):
-        setattr(fake, f, lambda *a, **k: (_ for _ in ()).throw(AssertionError("test pressed keys")))
-    monkeypatch.setitem(sys.modules, "pyautogui", fake)
+    from deepworkai.features import debug_surface
+    monkeypatch.setattr(debug_surface, "_send_keys",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("test pressed keys")))
 
 
 

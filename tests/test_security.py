@@ -217,9 +217,9 @@ def test_tests_cannot_touch_the_pc():
         subprocess.Popen(["notepad.exe"])
     with pytest.raises(AssertionError):
         webbrowser.open("https://example.com")
-    import pyautogui
+    from deepworkai.features import debug_surface
     with pytest.raises(AssertionError):
-        pyautogui.press("f5")
+        debug_surface._send_keys(["f5"])
 
 
 def test_time_travel_minimizes_but_never_closes(monkeypatch):

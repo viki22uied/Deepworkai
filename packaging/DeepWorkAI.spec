@@ -20,6 +20,8 @@ a = Analysis(
     excludes=[
         # Not used — keeps the download small
         "tkinter", "numpy", "scipy", "sklearn", "pandas", "matplotlib", "IPython", "pytest",
+        "cv2", "PIL", "pyautogui", "pyscreeze", "pymsgbox", "pytweening", "mouseinfo", "pygetwindow",
+        "pyrect", "setuptools", "pkg_resources",
         "PyQt6.QtWebEngineCore", "PyQt6.QtWebEngineWidgets", "PyQt6.QtQml", "PyQt6.QtQuick",
         "PyQt6.QtMultimedia", "PyQt6.QtPdf", "PyQt6.QtSql", "PyQt6.QtTest", "PyQt6.QtDesigner",
         "PyQt6.QtBluetooth", "PyQt6.QtPositioning", "PyQt6.Qt3DCore", "PyQt6.QtCharts",

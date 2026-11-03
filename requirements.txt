@@ -7,5 +7,4 @@ requests>=2.31.0      # Slack / GitHub / Jira HTTP APIs
 urllib3>=2.6.0        # CVE-2025-66418, CVE-2025-66471 (decompression DoS)
 PyQt6>=6.5.0          # The Hub window
 python-dotenv>=1.0.0  # .env file loading for tokens
-pyautogui>=0.9.54     # Debug surface keyboard shortcuts (F5, F10, F11 etc.)
 
